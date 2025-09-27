@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Connection Manager</title>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        .connection-form {
+            padding: 20px;
+            max-width: 500px;
+            margin: 0 auto;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        
+        .form-group input, .form-group select, .form-group textarea {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        
+        .form-row {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .form-row .form-group {
+            flex: 1;
+        }
+        
+        .advanced-options {
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            padding: 15px;
+            margin-top: 15px;
+            background-color: #f9f9f9;
+        }
+        
+        .advanced-toggle {
+            background: none;
+            border: none;
+            color: #0078d7;
+            cursor: pointer;
+            font-weight: bold;
+            padding: 0;
+            margin-bottom: 10px;
+        }
+        
+        .form-buttons {
+            text-align: center;
+            margin-top: 20px;
+        }
+        
+        .btn {
+            padding: 10px 20px;
+            margin: 0 10px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        
+        .btn-primary {
+            background-color: #0078d7;
+            color: white;
+        }
+        
+        .btn-secondary {
+            background-color: #ccc;
+            color: #333;
+        }
+        
+        .btn-danger {
+            background-color: #d70000;
+            color: white;
+        }
+        
+        .btn:hover {
+            opacity: 0.9;
+        }
+        
+        .connections-list {
+            padding: 20px;
+        }
+        
+        .connection-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 15px;
+            border: 1px solid #ddd;
+            margin-bottom: 10px;
+            border-radius: 4px;
+            background-color: #fff;
+        }
+        
+        .connection-info {
+            flex: 1;
+        }
+        
+        .connection-info strong {
+            font-size: 16px;
+        }
+        
+        .connection-details {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+        
+        .connection-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        
+        .connection-actions button {
+            padding: 5px 10px;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        
+        .connection-actions .btn-edit {
+            background-color: #0078d7;
+            color: white;
+        }
+        
+        .connection-actions .btn-delete {
+            background-color: #d70000;
+            color: white;
+        }
+        
+        .connection-actions .btn-test {
+            background-color: #28a745;
+            color: white;
+        }
+        
+        .tab-container {
+            display: flex;
+            border-bottom: 1px solid #ccc;
+        }
+        
+        .tab {
+            padding: 10px 20px;
+            cursor: pointer;
+            background-color: #f0f0f0;
+            border-right: 1px solid #ccc;
+        }
+        
+        .tab.active {
+            background-color: #fff;
+            font-weight: bold;
+        }
+        
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        .notification {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        
+        .notification.success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .notification.error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .notification.info {
+            background-color: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+    </style>
+</head>
+<body>
+    <div class="tab-container">
+        <div class="tab active" data-tab="new">New Connection</div>
+        <div class="tab" data-tab="manage">Manage Connections</div>
+    </div>
+    
+    <div class="tab-content active" id="new-tab">
+        <div class="connection-form">
+            <h2>New Connection</h2>
+            <div id="notification-area"></div>
+            
+            <div class="form-group">
+                <label for="connection-name">Connection Name *</label>
+                <input type="text" id="connection-name" placeholder="My Database Connection">
+            </div>
+            
+            <div class="form-group">
+                <label for="connection-type">Database Type *</label>
+                <select id="connection-type">
+                    <option value="mysql">MySQL</option>
+                    <option value="postgresql">PostgreSQL</option>
+                    <option value="mssql">SQL Server</option>
+                    <option value="sqlite">SQLite</option>
+                    <option value="oracle">Oracle</option>
+                    <option value="mongodb">MongoDB</option>
+                </select>
+            </div>
+            
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="host">Host *</label>
+                    <input type="text" id="host" placeholder="localhost">
+                </div>
+                
+                <div class="form-group">
+                    <label for="port">Port *</label>
+                    <input type="number" id="port" placeholder="3306">
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label for="database">Database Name *</label>
+                <input type="text" id="database" placeholder="my_database">
+            </div>
+            
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="username">Username *</label>
+                    <input type="text" id="username" placeholder="username">
+                </div>
+                
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" placeholder="password">
+                </div>
+            </div>
+            
+            <button class="advanced-toggle" id="advanced-toggle">Advanced Options ▼</button>
+            <div class="advanced-options" id="advanced-options" style="display: none;">
+                <div class="form-group">
+                    <label for="connection-timeout">Connection Timeout (seconds)</label>
+                    <input type="number" id="connection-timeout" placeholder="30" value="30">
+                </div>
+                
+                <div class="form-group">
+                    <label for="ssl-mode">SSL Mode</label>
+                    <select id="ssl-mode">
+                        <option value="disable">Disable</option>
+                        <option value="require">Require</option>
+                        <option value="verify-ca">Verify CA</option>
+                        <option value="verify-full">Verify Full</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="ssl-cert">SSL Certificate Path</label>
+                    <input type="text" id="ssl-cert" placeholder="/path/to/certificate.pem">
+                </div>
+                
+                <div class="form-group">
+                    <label for="ssl-key">SSL Key Path</label>
+                    <input type="text" id="ssl-key" placeholder="/path/to/key.pem">
+                </div>
+                
+                <div class="form-group">
+                    <label for="ssl-ca">SSL CA Path</label>
+                    <input type="text" id="ssl-ca" placeholder="/path/to/ca.pem">
+                </div>
+                
+                <div class="form-group">
+                    <label for="additional-params">Additional Parameters</label>
+                    <textarea id="additional-params" rows="3" placeholder="key1=value1&#10;key2=value2"></textarea>
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label for="description">Description</label>
+                <textarea id="description" rows="2" placeholder="Optional description for this connection"></textarea>
+            </div>
+            
+            <div class="form-buttons">
+                <button class="btn btn-secondary" id="test-connection">Test Connection</button>
+                <button class="btn btn-primary" id="save-connection">Save Connection</button>
+                <button class="btn btn-secondary" id="cancel-connection">Cancel</button>
+            </div>
+        </div>
+    </div>
+    
+    <div class="tab-content" id="manage-tab">
+        <div class="connections-list">
+            <h2>Manage Connections</h2>
+            <div id="connections-container">
+                <!-- Connections will be loaded here -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { ipcRenderer } = require('electron');
+        
+        // Application state
+        const state = {
+            currentTab: 'new'
+        };
+        
+        // Initialize the application when DOM is loaded
+        document.addEventListener('DOMContentLoaded', function() {
+            initializeApp();
+        });
+        
+        // Main application initialization
+        function initializeApp() {
+            // Setup event listeners
+            setupEventListeners();
+            
+            // Set default port on page load
+            document.getElementById('port').value = '3306';
+        }
+        
+        // Setup all event listeners
+        function setupEventListeners() {
+            setupTabEventListeners();
+            setupFormEventListeners();
+            setupAdvancedOptionsEventListeners();
+            setupIPCEventListeners();
+            setupDatabaseTypeEventListeners();
+        }
+        
+        // Setup tab event listeners
+        function setupTabEventListeners() {
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.addEventListener('click', () => {
+                    switchToTab(tab.getAttribute('data-tab'));
+                });
+            });
+        }
+        
+        // Setup form event listeners
+        function setupFormEventListeners() {
+            // Test connection button
+            document.getElementById('test-connection').addEventListener('click', testConnection);
+            
+            // Save connection button
+            document.getElementById('save-connection').addEventListener('click', saveConnection);
+            
+            // Cancel connection button
+            document.getElementById('cancel-connection').addEventListener('click', cancelConnection);
+        }
+        
+        // Setup advanced options event listeners
+        function setupAdvancedOptionsEventListeners() {
+            document.getElementById('advanced-toggle').addEventListener('click', toggleAdvancedOptions);
+        }
+        
+        // Setup IPC event listeners
+        function setupIPCEventListeners() {
+            // Handle connection saved
+            ipcRenderer.on('connection-saved', (event, connectionId) => {
+                showNotification('Connection saved successfully!', 'success');
+                clearForm();
+            });
+            
+            // Handle new connection test result
+            ipcRenderer.on('new-connection-test-result', (event, result) => {
+                if (result.success) {
+                    showNotification(result.message, 'success');
+                } else {
+                    showNotification(result.message, 'error');
+                }
+            });
+            
+            // Handle connections list
+            ipcRenderer.on('connections-list', (event, connections) => {
+                displayConnections(connections);
+            });
+            
+            // Handle connection test result
+            ipcRenderer.on('connection-test-result', (event, result) => {
+                if (result.success) {
+                    showNotification(result.message, 'success');
+                } else {
+                    showNotification(result.message, 'error');
+                }
+            });
+            
+            // Handle connection deleted
+            ipcRenderer.on('connection-deleted', (event, connectionId) => {
+                showNotification('Connection deleted successfully!', 'success');
+                loadConnections();
+            });
+        }
+        
+        // Setup database type event listeners
+        function setupDatabaseTypeEventListeners() {
+            document.getElementById('connection-type').addEventListener('change', updatePortBasedOnDatabaseType);
+        }
+        
+        // Tab management
+        function switchToTab(tabName) {
+            // Remove active class from all tabs and content
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            
+            // Add active class to clicked tab
+            document.querySelector(`.tab[data-tab="${tabName}"]`).classList.add('active');
+            
+            // Show corresponding content
+            document.getElementById(`${tabName}-tab`).classList.add('active');
+            
+            // Update state
+            state.currentTab = tabName;
+            
+            // Load connections if manage tab is selected
+            if (tabName === 'manage') {
+                loadConnections();
+            }
+        }
+        
+        // Form handling functions
+        function testConnection() {
+            const connection = getConnectionData();
+            
+            if (!validateConnectionData(connection)) {
+                return;
+            }
+            
+            showNotification('Testing connection...', 'info');
+            // Test the new connection before saving
+            ipcRenderer.send('test-new-connection', connection);
+        }
+        
+        function saveConnection() {
+            const connection = getConnectionData();
+            
+            if (!validateConnectionData(connection)) {
+                return;
+            }
+            
+            ipcRenderer.send('save-connection', connection);
+        }
+        
+        function cancelConnection() {
+            window.close();
+        }
+        
+        // Advanced options
+        function toggleAdvancedOptions() {
+            const options = document.getElementById('advanced-options');
+            const isVisible = options.style.display === 'block';
+            options.style.display = isVisible ? 'none' : 'block';
+            this.textContent = isVisible ? 'Advanced Options ▼' : 'Advanced Options ▲';
+        }
+        
+        // Get connection data from form
+        function getConnectionData() {
+            return {
+                name: document.getElementById('connection-name').value,
+                type: document.getElementById('connection-type').value,
+                host: document.getElementById('host').value,
+                port: document.getElementById('port').value,
+                database: document.getElementById('database').value,
+                username: document.getElementById('username').value,
+                password: document.getElementById('password').value,
+                timeout: document.getElementById('connection-timeout').value,
+                sslMode: document.getElementById('ssl-mode').value,
+                sslCert: document.getElementById('ssl-cert').value,
+                sslKey: document.getElementById('ssl-key').value,
+                sslCa: document.getElementById('ssl-ca').value,
+                additionalParams: document.getElementById('additional-params').value,
+                description: document.getElementById('description').value
+            };
+        }
+        
+        // Validate connection data
+        function validateConnectionData(connection) {
+            if (!connection.name || !connection.host || !connection.username || !connection.database) {
+                showNotification('Please fill in all required fields (marked with *)', 'error');
+                return false;
+            }
+            return true;
+        }
+        
+        // Clear form
+        function clearForm() {
+            document.getElementById('connection-form').reset();
+            // Reset advanced options
+            document.getElementById('advanced-options').style.display = 'none';
+            document.getElementById('advanced-toggle').textContent = 'Advanced Options ▼';
+        }
+        
+        // Load connections
+        function loadConnections() {
+            ipcRenderer.send('get-connections');
+        }
+        
+        // Display connections
+        function displayConnections(connections) {
+            try {
+                const container = document.getElementById('connections-container');
+                
+                if (!container) {
+                    console.error('Connections container not found');
+                    return;
+                }
+                
+                if (connections.length === 0) {
+                    container.innerHTML = '<p>No connections found. Create a new connection first.</p>';
+                    return;
+                }
+                
+                let html = '';
+                connections.forEach(connection => {
+                    html += `
+                        <div class="connection-item">
+                            <div class="connection-info">
+                                <strong>${connection.name}</strong>
+                                <div class="connection-details">
+                                    ${connection.type}://${connection.host}:${connection.port}/${connection.database}<br>
+                                    Username: ${connection.username}<br>
+                                    ${connection.description ? 'Description: ' + connection.description : ''}
+                                </div>
+                            </div>
+                            <div class="connection-actions">
+                                <button class="btn-edit" data-id="${connection.id}">Connect</button>
+                                <button class="btn-test" data-id="${connection.id}">Test</button>
+                                <button class="btn-delete" data-id="${connection.id}">Delete</button>
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                container.innerHTML = html;
+                
+                // Add event listeners to action buttons
+                setupConnectionActionEventListeners();
+            } catch (error) {
+                console.error('Error displaying connections:', error);
+                const container = document.getElementById('connections-container');
+                if (container) {
+                    container.innerHTML = '<p>Error loading connections. Please try again.</p>';
+                }
+            }
+        }
+        
+        // Setup connection action event listeners
+        function setupConnectionActionEventListeners() {
+            // Add event listeners to delete buttons
+            document.querySelectorAll('.btn-delete').forEach(button => {
+                button.addEventListener('click', (e) => {
+                    const connectionId = e.target.getAttribute('data-id') || e.target.parentElement.getAttribute('data-id');
+                    if (confirm('Are you sure you want to delete this connection?')) {
+                        ipcRenderer.send('delete-connection', connectionId);
+                    }
+                });
+            });
+            
+            // Add event listeners to connect buttons
+            document.querySelectorAll('.btn-edit').forEach(button => {
+                button.addEventListener('click', (e) => {
+                    const connectionId = e.target.getAttribute('data-id') || e.target.parentElement.getAttribute('data-id');
+                    // Send message to main process to connect to the database
+                    ipcRenderer.send('connect-to-database', connectionId);
+                });
+            });
+            
+            // Add event listeners to test buttons
+            document.querySelectorAll('.btn-test').forEach(button => {
+                button.addEventListener('click', (e) => {
+                    const connectionId = e.target.getAttribute('data-id') || e.target.parentElement.getAttribute('data-id');
+                    showNotification(`Testing connection ${connectionId}...`, 'info');
+                    // Test the existing connection
+                    ipcRenderer.send('test-connection', connectionId);
+                });
+            });
+        }
+        
+        // Update port based on database type
+        function updatePortBasedOnDatabaseType(e) {
+            const portField = document.getElementById('port');
+            switch(e.target.value) {
+                case 'mysql':
+                    portField.value = '3306';
+                    break;
+                case 'postgresql':
+                    portField.value = '5432';
+                    break;
+                case 'mssql':
+                    portField.value = '1433';
+                    break;
+                case 'sqlite':
+                    portField.value = '';
+                    break;
+                case 'oracle':
+                    portField.value = '1521';
+                    break;
+                case 'mongodb':
+                    portField.value = '27017';
+                    break;
+            }
+        }
+        
+        // Show notification
+        function showNotification(message, type) {
+            const notificationArea = document.getElementById('notification-area');
+            notificationArea.innerHTML = `<div class="notification ${type}">${message}</div>`;
+            
+            // Auto-hide notification after 5 seconds
+            setTimeout(() => {
+                notificationArea.innerHTML = '';
+            }, 5000);
+        }
+    </script>
+</body>
+</html>

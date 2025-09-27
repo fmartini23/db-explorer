@@ -1,0 +1,34 @@
+{
+  "appId": "com.example.dbexplorer",
+  "productName": "DB Explorer",
+  "directories": {
+    "output": "dist"
+  },
+  "files": [
+    "main.js",
+    "index.html",
+    "styles.css",
+    "renderer.js",
+    "package.json"
+  ],
+  "mac": {
+    "category": "public.app-category.developer-tools",
+    "target": [
+      "dmg",
+      "zip"
+    ]
+  },
+  "win": {
+    "target": [
+      "nsis",
+      "zip"
+    ]
+  },
+  "linux": {
+    "target": [
+      "AppImage",
+      "deb",
+      "rpm"
+    ]
+  }
+}

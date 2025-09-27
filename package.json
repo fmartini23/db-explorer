@@ -1,0 +1,33 @@
+{
+  "name": "db-explorer",
+  "version": "1.0.0",
+  "main": "main.js",
+  "description": "A desktop application for database management with a layout similar to Microsoft SQL Server Management Studio",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "build": "electron-builder",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "electron",
+    "database",
+    "sql",
+    "management",
+    "studio"
+  ],
+  "author": "Fernando Martini <fmartini23@gmail.com> (https://github.com/fmartini23)",
+  "license": "MIT",
+  "dependencies": {
+    "electron": "^38.1.2",
+    "mongodb": "^6.20.0",
+    "mssql": "^11.0.1",
+    "mysql2": "^3.15.1",
+    "oracledb": "^6.9.0",
+    "pg": "^8.16.3",
+    "sqlite3": "^5.1.7"
+  },
+  "devDependencies": {
+    "electron-builder": "^24.13.3"
+  }
+}

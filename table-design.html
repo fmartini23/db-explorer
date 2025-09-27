@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Table Design - DB Explorer</title>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        .table-design-container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            padding: 20px;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+        }
+
+        .table-design-header {
+            margin-bottom: 20px;
+        }
+
+        .table-design-header h1 {
+            font-size: 24px;
+            margin-bottom: 10px;
+        }
+
+        .table-info {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .table-info-item {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+        }
+
+        .table-info-item label {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .table-info-item input, .table-info-item select {
+            padding: 8px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background-color: var(--input-bg);
+            color: var(--text-color);
+        }
+
+        .columns-toolbar {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .columns-toolbar button {
+            padding: 8px 15px;
+            background-color: var(--button-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            cursor: pointer;
+            color: var(--text-color);
+        }
+
+        .columns-toolbar button:hover {
+            background-color: var(--button-hover-bg);
+        }
+
+        .columns-table-container {
+            flex: 1;
+            overflow: auto;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+        }
+
+        .columns-table {
+            width: 100%;
+            border-collapse: collapse;
+            background-color: var(--panel-bg);
+        }
+
+        .columns-table th {
+            background-color: var(--result-table-header);
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        .columns-table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .columns-table tr:nth-child(even) {
+            background-color: var(--result-table-row-even);
+        }
+
+        .columns-table tr:hover {
+            background-color: var(--result-table-row-hover);
+        }
+
+        .columns-table input, .columns-table select {
+            width: 100%;
+            padding: 6px;
+            border: 1px solid var(--border-color);
+            border-radius: 3px;
+            background-color: var(--input-bg);
+            color: var(--text-color);
+            box-sizing: border-box;
+        }
+
+        .columns-table .checkbox-cell {
+            text-align: center;
+        }
+
+        .columns-table .checkbox-cell input {
+            width: auto;
+        }
+
+        .actions-toolbar {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        .actions-toolbar button {
+            padding: 10px 20px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        .btn-primary {
+            background-color: #0078d7;
+            color: white;
+            border-color: #005a9e;
+        }
+
+        .btn-primary:hover {
+            background-color: #005a9e;
+        }
+
+        .btn-secondary {
+            background-color: var(--button-bg);
+            color: var(--text-color);
+        }
+
+        .btn-secondary:hover {
+            background-color: var(--button-hover-bg);
+        }
+
+        .btn-danger {
+            background-color: #d73700;
+            color: white;
+            border-color: #9e2a00;
+        }
+
+        .btn-danger:hover {
+            background-color: #9e2a00;
+        }
+        
+        .mode-indicator {
+            font-weight: bold;
+            color: #0078d7;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="table-design-container">
+        <div class="table-design-header">
+            <h1 id="window-title">Table Design</h1>
+            <div class="mode-indicator" id="mode-indicator">Editing existing table</div>
+            <div class="table-info">
+                <div class="table-info-item">
+                    <label for="table-name">Table Name</label>
+                    <input type="text" id="table-name" value="users">
+                </div>
+                <div class="table-info-item">
+                    <label for="table-schema">Schema</label>
+                    <input type="text" id="table-schema" value="dbo" readonly>
+                </div>
+                <div class="table-info-item">
+                    <label for="table-type">Table Type</label>
+                    <select id="table-type">
+                        <option>User Table</option>
+                        <option>System Table</option>
+                        <option>View</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <div class="columns-toolbar">
+            <button id="add-column">Add Column</button>
+            <button id="delete-column">Delete Column</button>
+            <button id="move-up">Move Up</button>
+            <button id="move-down">Move Down</button>
+        </div>
+
+        <div class="columns-table-container">
+            <table class="columns-table" id="columns-table">
+                <thead>
+                    <tr>
+                        <th class="checkbox-cell"><input type="checkbox" id="select-all"></th>
+                        <th>Column Name</th>
+                        <th>Data Type</th>
+                        <th>Length</th>
+                        <th>Precision</th>
+                        <th>Scale</th>
+                        <th>Allow Nulls</th>
+                        <th>Identity</th>
+                        <th>Primary Key</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Columns will be populated dynamically -->
+                </tbody>
+            </table>
+        </div>
+
+        <div class="actions-toolbar">
+            <button class="btn-secondary" id="cancel-btn">Cancel</button>
+            <button class="btn-primary" id="save-btn">Save</button>
+        </div>
+    </div>
+
+    <script>
+        const { ipcRenderer } = require('electron');
+        
+        // Initialize with data from main process
+        ipcRenderer.on('initialize-table-design', (event, { tableName, connectionId, mode }) => {
+            window.connectionId = connectionId;
+            window.mode = mode || 'edit'; // 'edit' or 'create'
+            
+            if (window.mode === 'edit') {
+                document.getElementById('window-title').textContent = 'Table Design';
+                document.getElementById('mode-indicator').textContent = 'Editing existing table';
+                document.getElementById('table-name').value = tableName;
+                document.getElementById('table-name').readOnly = true; // Prevent editing existing table name
+                window.tableName = tableName;
+                // Load existing columns for the table
+                loadTableColumns(connectionId, tableName);
+            } else {
+                document.getElementById('window-title').textContent = 'Create Table';
+                document.getElementById('mode-indicator').textContent = 'Creating new table';
+                document.getElementById('table-name').value = tableName || '';
+                document.getElementById('table-name').readOnly = false;
+                window.tableName = tableName || '';
+                // Start with an empty table
+                populateColumnsTable([]);
+            }
+            
+            // Add an initial empty row for new tables
+            if (window.mode === 'create' && document.querySelectorAll('.columns-table tbody tr').length === 0) {
+                addEmptyRow();
+            }
+        });
+        
+        // Add an empty row for new columns
+        function addEmptyRow() {
+            const tbody = document.querySelector('.columns-table tbody');
+            const newRow = document.createElement('tr');
+            
+            newRow.innerHTML = `
+                <td class="checkbox-cell"><input type="checkbox"></td>
+                <td><input type="text" value=""></td>
+                <td>
+                    <select>
+                        <option value="int">int</option>
+                        <option value="bigint">bigint</option>
+                        <option value="smallint">smallint</option>
+                        <option value="tinyint">tinyint</option>
+                        <option value="bit">bit</option>
+                        <option value="decimal">decimal</option>
+                        <option value="numeric">numeric</option>
+                        <option value="money">money</option>
+                        <option value="smallmoney">smallmoney</option>
+                        <option value="float">float</option>
+                        <option value="real">real</option>
+                        <option value="datetime">datetime</option>
+                        <option value="smalldatetime">smalldatetime</option>
+                        <option value="date">date</option>
+                        <option value="time">time</option>
+                        <option value="datetime2">datetime2</option>
+                        <option value="datetimeoffset">datetimeoffset</option>
+                        <option value="char">char</option>
+                        <option value="varchar" selected>varchar</option>
+                        <option value="text">text</option>
+                        <option value="nchar">nchar</option>
+                        <option value="nvarchar">nvarchar</option>
+                        <option value="ntext">ntext</option>
+                        <option value="binary">binary</option>
+                        <option value="varbinary">varbinary</option>
+                        <option value="image">image</option>
+                        <option value="uniqueidentifier">uniqueidentifier</option>
+                        <option value="xml">xml</option>
+                        <option value="sql_variant">sql_variant</option>
+                    </select>
+                </td>
+                <td><input type="number" value=""></td>
+                <td><input type="number" value=""></td>
+                <td><input type="number" value=""></td>
+                <td class="checkbox-cell"><input type="checkbox" checked></td>
+                <td class="checkbox-cell"><input type="checkbox"></td>
+                <td class="checkbox-cell"><input type="checkbox"></td>
+            `;
+            
+            tbody.appendChild(newRow);
+        }
+        
+        // Load existing table columns
+        function loadTableColumns(connectionId, tableName) {
+            // Send request to main process to get actual column data
+            ipcRenderer.send('get-table-columns-for-design', { connectionId, tableName });
+        }
+        
+        // Handle response with table columns
+        ipcRenderer.on('table-columns-for-design', (event, { columns, error }) => {
+            if (error) {
+                console.error('Error loading table columns:', error);
+                alert('Error loading table columns: ' + error);
+                return;
+            }
+            
+            populateColumnsTable(columns);
+        });
+        
+        // Handle table design saved response
+        ipcRenderer.on('table-design-saved', (event, { message }) => {
+            alert(message);
+            window.close();
+        });
+        
+        // Handle table design error response
+        ipcRenderer.on('table-design-error', (event, { message }) => {
+            alert('Error saving table design: ' + message);
+        });
+        
+        // Handle table created response
+        ipcRenderer.on('table-created', (event, { message }) => {
+            alert(message);
+            window.close();
+        });
+        
+        // Handle table create error response
+        ipcRenderer.on('table-create-error', (event, { message }) => {
+            alert('Error creating table: ' + message);
+        });
+
+        // Populate the columns table with data
+        function populateColumnsTable(columns) {
+            const tbody = document.querySelector('#columns-table tbody');
+            tbody.innerHTML = ''; // Clear existing rows
+            
+            if (columns.length === 0) {
+                // Add an empty row for new tables
+                addEmptyRow();
+                return;
+            }
+            
+            columns.forEach(column => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td class="checkbox-cell"><input type="checkbox"></td>
+                    <td><input type="text" value="${column.name}"></td>
+                    <td>
+                        <select>
+                            <option value="int" ${column.type === 'int' ? 'selected' : ''}>int</option>
+                            <option value="bigint" ${column.type === 'bigint' ? 'selected' : ''}>bigint</option>
+                            <option value="smallint" ${column.type === 'smallint' ? 'selected' : ''}>smallint</option>
+                            <option value="tinyint" ${column.type === 'tinyint' ? 'selected' : ''}>tinyint</option>
+                            <option value="bit" ${column.type === 'bit' ? 'selected' : ''}>bit</option>
+                            <option value="decimal" ${column.type === 'decimal' ? 'selected' : ''}>decimal</option>
+                            <option value="numeric" ${column.type === 'numeric' ? 'selected' : ''}>numeric</option>
+                            <option value="money" ${column.type === 'money' ? 'selected' : ''}>money</option>
+                            <option value="smallmoney" ${column.type === 'smallmoney' ? 'selected' : ''}>smallmoney</option>
+                            <option value="float" ${column.type === 'float' ? 'selected' : ''}>float</option>
+                            <option value="real" ${column.type === 'real' ? 'selected' : ''}>real</option>
+                            <option value="datetime" ${column.type === 'datetime' ? 'selected' : ''}>datetime</option>
+                            <option value="smalldatetime" ${column.type === 'smalldatetime' ? 'selected' : ''}>smalldatetime</option>
+                            <option value="date" ${column.type === 'date' ? 'selected' : ''}>date</option>
+                            <option value="time" ${column.type === 'time' ? 'selected' : ''}>time</option>
+                            <option value="datetime2" ${column.type === 'datetime2' ? 'selected' : ''}>datetime2</option>
+                            <option value="datetimeoffset" ${column.type === 'datetimeoffset' ? 'selected' : ''}>datetimeoffset</option>
+                            <option value="char" ${column.type === 'char' ? 'selected' : ''}>char</option>
+                            <option value="varchar" ${column.type === 'varchar' ? 'selected' : ''}>varchar</option>
+                            <option value="text" ${column.type === 'text' ? 'selected' : ''}>text</option>
+                            <option value="nchar" ${column.type === 'nchar' ? 'selected' : ''}>nchar</option>
+                            <option value="nvarchar" ${column.type === 'nvarchar' ? 'selected' : ''}>nvarchar</option>
+                            <option value="ntext" ${column.type === 'ntext' ? 'selected' : ''}>ntext</option>
+                            <option value="binary" ${column.type === 'binary' ? 'selected' : ''}>binary</option>
+                            <option value="varbinary" ${column.type === 'varbinary' ? 'selected' : ''}>varbinary</option>
+                            <option value="image" ${column.type === 'image' ? 'selected' : ''}>image</option>
+                            <option value="uniqueidentifier" ${column.type === 'uniqueidentifier' ? 'selected' : ''}>uniqueidentifier</option>
+                            <option value="xml" ${column.type === 'xml' ? 'selected' : ''}>xml</option>
+                            <option value="sql_variant" ${column.type === 'sql_variant' ? 'selected' : ''}>sql_variant</option>
+                        </select>
+                    </td>
+                    <td><input type="number" value="${column.length || ''}"></td>
+                    <td><input type="number" value="${column.precision || ''}"></td>
+                    <td><input type="number" value="${column.scale || ''}"></td>
+                    <td class="checkbox-cell"><input type="checkbox" ${column.nullable ? 'checked' : ''}></td>
+                    <td class="checkbox-cell"><input type="checkbox" ${column.identity ? 'checked' : ''}></td>
+                    <td class="checkbox-cell"><input type="checkbox" ${column.primaryKey ? 'checked' : ''}></td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        // Select all checkbox functionality
+        document.getElementById('select-all').addEventListener('change', function() {
+            const checkboxes = document.querySelectorAll('.columns-table tbody input[type="checkbox"]');
+            checkboxes.forEach(checkbox => {
+                checkbox.checked = this.checked;
+            });
+        });
+
+        // Add column functionality
+        document.getElementById('add-column').addEventListener('click', function() {
+            addEmptyRow();
+        });
+
+        // Delete column functionality
+        document.getElementById('delete-column').addEventListener('click', function() {
+            const checkboxes = document.querySelectorAll('.columns-table tbody input[type="checkbox"]:checked');
+            if (checkboxes.length === 0) {
+                alert('Please select at least one column to delete.');
+                return;
+            }
+            
+            if (confirm(`Are you sure you want to delete ${checkboxes.length} column(s)?`)) {
+                checkboxes.forEach(checkbox => {
+                    checkbox.closest('tr').remove();
+                });
+            }
+        });
+
+        // Move up functionality
+        document.getElementById('move-up').addEventListener('click', function() {
+            const checkboxes = document.querySelectorAll('.columns-table tbody input[type="checkbox"]:checked');
+            if (checkboxes.length === 0) {
+                alert('Please select at least one column to move.');
+                return;
+            }
+            
+            checkboxes.forEach(checkbox => {
+                const row = checkbox.closest('tr');
+                const prevRow = row.previousElementSibling;
+                if (prevRow) {
+                    row.parentNode.insertBefore(row, prevRow);
+                }
+            });
+        });
+
+        // Move down functionality
+        document.getElementById('move-down').addEventListener('click', function() {
+            const checkboxes = document.querySelectorAll('.columns-table tbody input[type="checkbox"]:checked');
+            if (checkboxes.length === 0) {
+                alert('Please select at least one column to move.');
+                return;
+            }
+            
+            // Process in reverse order to maintain correct positioning
+            const rows = Array.from(checkboxes).map(checkbox => checkbox.closest('tr')).reverse();
+            rows.forEach(row => {
+                const nextRow = row.nextElementSibling;
+                if (nextRow) {
+                    row.parentNode.insertBefore(nextRow, row);
+                }
+            });
+        });
+
+        // Save functionality
+        document.getElementById('save-btn').addEventListener('click', function() {
+            // Collect table data
+            const tableName = document.getElementById('table-name').value.trim();
+            const tableSchema = document.getElementById('table-schema').value;
+            const tableType = document.getElementById('table-type').value;
+            
+            if (!tableName) {
+                alert('Please enter a table name.');
+                return;
+            }
+            
+            // Collect column data
+            const columns = [];
+            const rows = document.querySelectorAll('.columns-table tbody tr');
+            
+            if (rows.length === 0) {
+                alert('Please add at least one column.');
+                return;
+            }
+            
+            let hasPrimaryKey = false;
+            let columnNameSet = new Set();
+            
+            for (let i = 0; i < rows.length; i++) {
+                const row = rows[i];
+                const cells = row.querySelectorAll('td');
+                
+                const columnName = cells[1].querySelector('input').value.trim();
+                if (!columnName) {
+                    alert(`Please enter a name for column ${i + 1}.`);
+                    return;
+                }
+                
+                // Check for duplicate column names
+                if (columnNameSet.has(columnName)) {
+                    alert(`Duplicate column name found: ${columnName}. Please use unique column names.`);
+                    return;
+                }
+                columnNameSet.add(columnName);
+                
+                const column = {
+                    name: columnName,
+                    type: cells[2].querySelector('select').value,
+                    length: cells[3].querySelector('input').value,
+                    precision: cells[4].querySelector('input').value,
+                    scale: cells[5].querySelector('input').value,
+                    nullable: cells[6].querySelector('input').checked,
+                    identity: cells[7].querySelector('input').checked,
+                    primaryKey: cells[8].querySelector('input').checked
+                };
+                
+                if (column.primaryKey) {
+                    hasPrimaryKey = true;
+                }
+                
+                columns.push(column);
+            }
+            
+            // For new tables, require at least one primary key
+            if (window.mode === 'create' && !hasPrimaryKey) {
+                if (!confirm('No primary key defined. Are you sure you want to create a table without a primary key?')) {
+                    return;
+                }
+            }
+            
+            // Send data to main process
+            if (window.mode === 'edit') {
+                ipcRenderer.send('save-table-design', { 
+                    tableName, 
+                    tableSchema, 
+                    tableType, 
+                    columns, 
+                    connectionId: window.connectionId 
+                });
+            } else {
+                ipcRenderer.send('create-table', { 
+                    tableName, 
+                    tableSchema, 
+                    tableType, 
+                    columns, 
+                    connectionId: window.connectionId 
+                });
+            }
+        });
+
+        // Cancel functionality
+        document.getElementById('cancel-btn').addEventListener('click', function() {
+            if (confirm('Are you sure you want to cancel? Any unsaved changes will be lost.')) {
+                window.close();
+            }
+        });
+    </script>
+</body>
+</html>

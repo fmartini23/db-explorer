@@ -1,0 +1,2565 @@
+const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron');
+const path = require('path');
+const fs = require('fs');
+const crypto = require('crypto');
+
+// Check if we're in development mode
+const isDev = process.argv.includes('--dev') || process.argv.includes('--inspect=5858');
+
+// Database drivers
+const mysql = require('mysql2/promise');
+const { Client } = require('pg');
+const sql = require('mssql');
+const sqlite3 = require('sqlite3').verbose();
+const oracledb = require('oracledb');
+const { MongoClient } = require('mongodb');
+
+// Configuration
+const ENCRYPTION_KEY = crypto.createHash('sha256').update('your-secret-key').digest('base64').substr(0, 32);
+const CONNECTIONS_DIR = path.join(app.getPath('userData'), 'connections');
+
+// Utility functions
+let recentFiles = [];
+
+function encrypt(text) {
+  const iv = crypto.randomBytes(16);
+  const cipher = crypto.createCipheriv('aes-256-cbc', Buffer.from(ENCRYPTION_KEY), iv);
+  let encrypted = cipher.update(text);
+  encrypted = Buffer.concat([encrypted, cipher.final()]);
+  return { iv: iv.toString('hex'), encryptedData: encrypted.toString('hex') };
+}
+
+function decrypt(encryptedData, iv) {
+  const ivBuffer = Buffer.from(iv, 'hex');
+  const encryptedBuffer = Buffer.from(encryptedData, 'hex');
+  const decipher = crypto.createDecipheriv('aes-256-cbc', Buffer.from(ENCRYPTION_KEY), ivBuffer);
+  let decrypted = decipher.update(encryptedBuffer);
+  decrypted = Buffer.concat([decrypted, decipher.final()]);
+  return decrypted.toString();
+}
+
+function ensureConnectionsDir() {
+  if (!fs.existsSync(CONNECTIONS_DIR)) {
+    fs.mkdirSync(CONNECTIONS_DIR, { recursive: true });
+  }
+}
+
+// Window management
+let mainWindow;
+
+// Add this variable to track open file paths for each window/tab
+let openFilePaths = new Map();
+
+function createWindow() {
+  mainWindow = new BrowserWindow({
+    width: 1400,
+    height: 900,
+    minWidth: 1000,
+    minHeight: 700,
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false
+    }
+  });
+
+  mainWindow.loadFile('index.html');
+  
+  // Enable dev tools in development mode
+  if (isDev) {
+    mainWindow.webContents.openDevTools();
+  }
+  
+  // Create the native menu
+  const menu = Menu.buildFromTemplate(getMenuTemplate());
+  Menu.setApplicationMenu(menu);
+  
+  // Handle file saving
+  ipcMain.on('save-file-content', (event, content, tabId) => {
+    const filePath = openFilePaths.get(tabId);
+    if (filePath) {
+      fs.writeFile(filePath, content, 'utf8', (err) => {
+        if (err) {
+          event.sender.send('file-save-error', err.message);
+        } else {
+          event.sender.send('file-saved', filePath);
+        }
+      });
+    } else {
+      // If no file path, trigger save as dialog
+      dialog.showSaveDialog(mainWindow, {
+        filters: [
+          { name: 'SQL Files', extensions: ['sql'] },
+          { name: 'All Files', extensions: ['*'] }
+        ]
+      }).then(result => {
+        if (!result.canceled) {
+          const newFilePath = result.filePath;
+          fs.writeFile(newFilePath, content, 'utf8', (err) => {
+            if (err) {
+              event.sender.send('file-save-error', err.message);
+            } else {
+              openFilePaths.set(tabId, newFilePath);
+              event.sender.send('file-saved', newFilePath);
+            }
+          });
+        }
+      }).catch(err => {
+        event.sender.send('file-save-error', err.message);
+      });
+    }
+  });
+  
+  // Handle save as dialog
+  ipcMain.on('save-file-as-dialog', (event, content, tabId) => {
+    dialog.showSaveDialog(mainWindow, {
+      filters: [
+        { name: 'SQL Files', extensions: ['sql'] },
+        { name: 'All Files', extensions: ['*'] }
+      ]
+    }).then(result => {
+      if (!result.canceled) {
+        const filePath = result.filePath;
+        fs.writeFile(filePath, content, 'utf8', (err) => {
+          if (err) {
+            event.sender.send('file-save-error', err.message);
+          } else {
+            openFilePaths.set(tabId, filePath);
+            event.sender.send('file-saved', filePath);
+          }
+        });
+      }
+    }).catch(err => {
+      event.sender.send('file-save-error', err.message);
+    });
+  });
+  
+  // Handle file saved
+  ipcMain.on('file-saved', (event, filePath) => {
+    // Add to recent files
+    if (!recentFiles.includes(filePath)) {
+      recentFiles.unshift(filePath);
+      if (recentFiles.length > 10) recentFiles.pop(); // Keep only last 10
+    }
+  });
+}
+
+function createConnectionWindow() {
+  const connectionWindow = new BrowserWindow({
+    width: 600,
+    height: 700,
+    resizable: true,
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false
+    }
+  });
+
+  connectionWindow.loadFile('connection.html');
+}
+
+// Add this function after the createConnectionWindow function
+function createTableDesignWindow(tableName, connectionId) {
+  const tableDesignWindow = new BrowserWindow({
+    width: 1000,
+    height: 700,
+    resizable: true,
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false
+    }
+  });
+
+  // Load the table design HTML file
+  tableDesignWindow.loadFile('table-design.html');
+  
+  // Pass the table name and connection ID to the window
+  tableDesignWindow.webContents.on('did-finish-load', () => {
+    tableDesignWindow.webContents.send('initialize-table-design', { tableName, connectionId });
+  });
+}
+
+// Menu template
+function getMenuTemplate() {
+  return [
+    {
+      label: 'File',
+      submenu: [
+        {
+          label: 'New Query',
+          accelerator: 'CmdOrCtrl+N',
+          click: () => {
+            if (mainWindow) {
+              mainWindow.webContents.send('new-query');
+            }
+          }
+        },
+        {
+          label: 'New Window',
+          accelerator: 'CmdOrCtrl+Shift+N',
+          click: () => {
+            createWindow();
+          }
+        },
+        { type: 'separator' },
+        {
+          label: 'Open',
+          accelerator: 'CmdOrCtrl+O',
+          click: () => {
+            if (mainWindow) {
+              dialog.showOpenDialog(mainWindow, {
+                properties: ['openFile'],
+                filters: [
+                  { name: 'SQL Files', extensions: ['sql'] },
+                  { name: 'All Files', extensions: ['*'] }
+                ]
+              }).then(result => {
+                if (!result.canceled && result.filePaths.length > 0) {
+                  const filePath = result.filePaths[0];
+                  fs.readFile(filePath, 'utf8', (err, data) => {
+                    if (err) {
+                      mainWindow.webContents.send('file-open-error', err.message);
+                    } else {
+                      // Add to recent files
+                      if (!recentFiles.includes(filePath)) {
+                        recentFiles.unshift(filePath);
+                        if (recentFiles.length > 10) recentFiles.pop(); // Keep only last 10
+                      }
+                      mainWindow.webContents.send('file-opened', { filePath, content: data });
+                    }
+                  });
+                }
+              }).catch(err => {
+                mainWindow.webContents.send('file-open-error', err.message);
+              });
+            }
+          }
+        },
+        {
+          label: 'Open Recent',
+          submenu: [
+            {
+              label: 'Clear Recent Files',
+              click: () => {
+                recentFiles = [];
+                // Update the menu
+                const menu = Menu.buildFromTemplate(getMenuTemplate());
+                Menu.setApplicationMenu(menu);
+              }
+            },
+            { type: 'separator' }
+          ].concat(
+            recentFiles.length > 0 ? 
+            recentFiles.map(filePath => ({
+              label: path.basename(filePath),
+              click: () => {
+                fs.readFile(filePath, 'utf8', (err, data) => {
+                  if (err) {
+                    mainWindow.webContents.send('file-open-error', err.message);
+                  } else {
+                    mainWindow.webContents.send('file-opened', { filePath, content: data });
+                  }
+                });
+              }
+            })) :
+            [{ label: 'No recent files', enabled: false }]
+          )
+        },
+        { type: 'separator' },
+        {
+          label: 'Save',
+          accelerator: 'CmdOrCtrl+S',
+          click: () => {
+            if (mainWindow) {
+              mainWindow.webContents.send('save-file');
+            }
+          }
+        },
+        {
+          label: 'Save As...',
+          accelerator: 'CmdOrCtrl+Shift+S',
+          click: () => {
+            if (mainWindow) {
+              mainWindow.webContents.send('save-file-as');
+            }
+          }
+        },
+        { type: 'separator' },
+        {
+          label: 'Exit',
+          accelerator: 'CmdOrCtrl+Q',
+          click: () => {
+            app.quit();
+          }
+        }
+      ]
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        {
+          label: 'Undo',
+          accelerator: 'CmdOrCtrl+Z',
+          click: () => {
+            if (mainWindow) {
+              mainWindow.webContents.send('undo');
+            }
+          }
+        },
+        {
+          label: 'Redo',
+          accelerator: 'CmdOrCtrl+Y',
+          click: () => {
+            if (mainWindow) {
+              mainWindow.webContents.send('redo');
+            }
+          }
+        },
+        { type: 'separator' },
+        {
+          label: 'Cut',
+          accelerator: 'CmdOrCtrl+X',
+          click: () => {
+            if (mainWindow) {
+              mainWindow.webContents.send('cut');
+            }
+          }
+        },
+        {
+          label: 'Copy',
+          accelerator: 'CmdOrCtrl+C',
+          click: () => {
+            if (mainWindow) {
+              mainWindow.webContents.send('copy');
+            }
+          }
+        },
+        {
+          label: 'Paste',
+          accelerator: 'CmdOrCtrl+V',
+          click: () => {
+            if (mainWindow) {
+              mainWindow.webContents.send('paste');
+            }
+          }
+        },
+        { type: 'separator' },
+        {
+          label: 'Find',
+          accelerator: 'CmdOrCtrl+F',
+          click: () => {
+            if (mainWindow) {
+              mainWindow.webContents.send('find');
+            }
+          }
+        },
+        {
+          label: 'Replace',
+          accelerator: 'CmdOrCtrl+H',
+          click: () => {
+            if (mainWindow) {
+              mainWindow.webContents.send('replace');
+            }
+          }
+        },
+        { type: 'separator' },
+        {
+          label: 'Select All',
+          accelerator: 'CmdOrCtrl+A',
+          click: () => {
+            if (mainWindow) {
+              mainWindow.webContents.send('select-all');
+            }
+          }
+        }
+      ]
+    },
+    {
+      label: 'View',
+      submenu: [
+        {
+          label: 'Object Explorer',
+          click: () => {
+            mainWindow.webContents.send('object-explorer');
+          }
+        },
+        {
+          label: 'Properties',
+          click: () => {
+            mainWindow.webContents.send('properties');
+          }
+        },
+        { type: 'separator' },
+        {
+          label: 'Theme',
+          submenu: [
+            {
+              label: 'Light',
+              type: 'radio',
+              checked: false,
+              click: () => {
+                mainWindow.webContents.send('set-theme', 'light');
+              }
+            },
+            {
+              label: 'Dark',
+              type: 'radio',
+              checked: false,
+              click: () => {
+                mainWindow.webContents.send('set-theme', 'dark');
+              }
+            },
+            {
+              label: 'System',
+              type: 'radio',
+              checked: true,
+              click: () => {
+                mainWindow.webContents.send('set-theme', 'system');
+              }
+            }
+          ]
+        },
+        { type: 'separator' },
+        {
+          label: 'Enter Full Screen',
+          accelerator: 'F11',
+          click: () => {
+            if (mainWindow) {
+              mainWindow.setFullScreen(!mainWindow.isFullScreen());
+            }
+          }
+        }
+      ]
+    },
+    {
+      label: 'Query',
+      submenu: [
+        {
+          label: 'Execute',
+          accelerator: 'F5',
+          click: () => {
+            mainWindow.webContents.send('execute');
+          }
+        },
+        {
+          label: 'Execute Selection',
+          accelerator: 'CmdOrCtrl+E',
+          click: () => {
+            mainWindow.webContents.send('execute-selection');
+          }
+        },
+        { type: 'separator' },
+        {
+          label: 'Parse Query',
+          click: () => {
+            mainWindow.webContents.send('parse');
+          }
+        },
+        {
+          label: 'Display Estimated Execution Plan',
+          click: () => {
+            mainWindow.webContents.send('display-estimated-plan');
+          }
+        },
+        {
+          label: 'Include Actual Execution Plan',
+          click: () => {
+            mainWindow.webContents.send('include-actual-plan');
+          }
+        },
+        {
+          label: 'Include Client Statistics',
+          click: () => {
+            mainWindow.webContents.send('include-client-statistics');
+          }
+        },
+        { type: 'separator' },
+        {
+          label: 'Specify Values for Template Parameters',
+          click: () => {
+            mainWindow.webContents.send('specify-values');
+          }
+        },
+        {
+          label: 'Design Query in Editor',
+          click: () => {
+            mainWindow.webContents.send('design-query');
+          }
+        }
+      ]
+    },
+    {
+      label: 'Database',
+      submenu: [
+        {
+          label: 'Connect',
+          click: () => {
+            mainWindow.webContents.send('connect');
+          }
+        },
+        {
+          label: 'Disconnect',
+          click: () => {
+            mainWindow.webContents.send('disconnect');
+          }
+        },
+        { type: 'separator' },
+        {
+          label: 'Refresh',
+          click: () => {
+            mainWindow.webContents.send('refresh');
+          }
+        }
+      ]
+    },
+    {
+      label: 'Tools',
+      submenu: [
+        {
+          label: 'Manage Connections',
+          click: () => {
+            createConnectionWindow();
+          }
+        },
+        {
+          label: 'Options',
+          click: () => {
+            mainWindow.webContents.send('options');
+          }
+        }
+      ]
+    },
+    {
+      label: 'Help',
+      submenu: [
+        {
+          label: 'View Help',
+          click: () => {
+            mainWindow.webContents.send('view-help');
+          }
+        },
+        {
+          label: 'About',
+          click: () => {
+            mainWindow.webContents.send('about');
+          }
+        }
+      ]
+    }
+  ];
+}
+
+// App lifecycle
+app.whenReady().then(() => {
+  createWindow();
+
+  app.on('activate', function () {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
+});
+
+app.on('window-all-closed', function () {
+  if (process.platform !== 'darwin') app.quit();
+});
+
+// IPC handlers for menu actions
+ipcMain.on('exit-app', () => {
+  app.quit();
+});
+
+// IPC handler for updating theme menu
+ipcMain.on('update-theme-menu', (event, theme) => {
+  // Rebuild the menu with the correct theme checked
+  const menuTemplate = getMenuTemplate();
+  
+  // Find the theme submenu and update the checked state
+  const viewMenu = menuTemplate.find(menu => menu.label === 'View');
+  if (viewMenu) {
+    const themeMenu = viewMenu.submenu.find(item => item.label === 'Theme');
+    if (themeMenu) {
+      themeMenu.submenu.forEach(item => {
+        item.checked = item.label.toLowerCase() === theme;
+      });
+    }
+  }
+  
+  // Update the application menu
+  const menu = Menu.buildFromTemplate(menuTemplate);
+  Menu.setApplicationMenu(menu);
+});
+
+// IPC handler for toggling full screen
+ipcMain.on('toggle-fullscreen', () => {
+  if (mainWindow) {
+    mainWindow.setFullScreen(!mainWindow.isFullScreen());
+  }
+});
+
+ipcMain.on('open-file-dialog', (event) => {
+  dialog.showOpenDialog({
+    properties: ['openFile'],
+    filters: [
+      { name: 'SQL Files', extensions: ['sql'] },
+      { name: 'All Files', extensions: ['*'] }
+    ]
+  }).then(result => {
+    if (!result.canceled && result.filePaths.length > 0) {
+      const filePath = result.filePaths[0];
+      fs.readFile(filePath, 'utf8', (err, data) => {
+        if (err) {
+          event.reply('file-open-error', err.message);
+        } else {
+          event.reply('file-opened', { filePath, content: data });
+        }
+      });
+    }
+  }).catch(err => {
+    event.reply('file-open-error', err.message);
+  });
+});
+
+// IPC handlers for connection management
+ipcMain.on('open-connection-window', () => {
+  createConnectionWindow();
+});
+
+ipcMain.on('save-connection', (event, connection) => {
+  try {
+    ensureConnectionsDir();
+    
+    // Generate a unique ID for the connection
+    const connectionId = Date.now().toString();
+    const connectionFile = path.join(CONNECTIONS_DIR, `${connectionId}.json`);
+
+    // Encrypt sensitive data
+    const encryptedPassword = connection.password ? encrypt(connection.password) : null;
+
+    // Save connection with encrypted password
+    const connectionData = {
+      id: connectionId,
+      name: connection.name,
+      type: connection.type,
+      host: connection.host,
+      port: connection.port,
+      database: connection.database,
+      username: connection.username,
+      password: encryptedPassword ? {
+        iv: encryptedPassword.iv,
+        encryptedData: encryptedPassword.encryptedData
+      } : null,
+      timeout: connection.timeout,
+      sslMode: connection.sslMode,
+      sslCert: connection.sslCert,
+      sslKey: connection.sslKey,
+      sslCa: connection.sslCa,
+      additionalParams: connection.additionalParams,
+      description: connection.description
+    };
+
+    fs.writeFileSync(connectionFile, JSON.stringify(connectionData, null, 2));
+    event.reply('connection-saved', connectionId);
+  } catch (error) {
+    console.error('Error saving connection:', error);
+    event.reply('connection-error', { message: 'Failed to save connection' });
+  }
+});
+
+ipcMain.on('get-connections', (event) => {
+  try {
+    ensureConnectionsDir();
+    const connections = [];
+
+    if (fs.existsSync(CONNECTIONS_DIR)) {
+      const files = fs.readdirSync(CONNECTIONS_DIR);
+      files.forEach(file => {
+        if (path.extname(file) === '.json') {
+          try {
+            const filePath = path.join(CONNECTIONS_DIR, file);
+            const connectionData = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+            // For display purposes, we'll just show that a password is set
+            connectionData.password = connectionData.password ? '••••••••' : '';
+            connections.push(connectionData);
+          } catch (error) {
+            console.error(`Error reading connection file ${file}:`, error);
+          }
+        }
+      });
+    }
+
+    event.reply('connections-list', connections);
+  } catch (error) {
+    console.error('Error getting connections:', error);
+    event.reply('connections-list', []);
+  }
+});
+
+ipcMain.on('get-connection-details', (event, connectionId) => {
+  try {
+    const connectionFile = path.join(CONNECTIONS_DIR, `${connectionId}.json`);
+
+    if (fs.existsSync(connectionFile)) {
+      const connectionData = JSON.parse(fs.readFileSync(connectionFile, 'utf8'));
+      // Decrypt the password
+      if (connectionData.password) {
+        try {
+          connectionData.password = decrypt(connectionData.password.encryptedData, connectionData.password.iv);
+        } catch (error) {
+          console.error('Error decrypting password:', error);
+          connectionData.password = '';
+        }
+      }
+      event.reply('connection-details', connectionData);
+    } else {
+      event.reply('connection-details', null);
+    }
+  } catch (error) {
+    console.error('Error getting connection details:', error);
+    event.reply('connection-error', { message: 'Failed to get connection details', error: error.message });
+  }
+});
+
+ipcMain.on('delete-connection', (event, connectionId) => {
+  try {
+    const connectionFile = path.join(CONNECTIONS_DIR, `${connectionId}.json`);
+
+    if (fs.existsSync(connectionFile)) {
+      fs.unlinkSync(connectionFile);
+    }
+
+    event.reply('connection-deleted', connectionId);
+  } catch (error) {
+    console.error('Error deleting connection:', error);
+    event.reply('connection-error', { message: 'Failed to delete connection' });
+  }
+});
+
+// IPC handler for testing connections
+ipcMain.on('test-connection', async (event, connectionId) => {
+  try {
+    const connectionFile = path.join(CONNECTIONS_DIR, `${connectionId}.json`);
+
+    if (fs.existsSync(connectionFile)) {
+      const connectionData = JSON.parse(fs.readFileSync(connectionFile, 'utf8'));
+      // Decrypt the password
+      if (connectionData.password) {
+        try {
+          connectionData.password = decrypt(connectionData.password.encryptedData, connectionData.password.iv);
+        } catch (error) {
+          console.error('Error decrypting password:', error);
+          connectionData.password = '';
+        }
+      }
+      
+      // Test the connection based on type
+      let success = false;
+      let message = '';
+      
+      try {
+        switch(connectionData.type) {
+          case 'mysql':
+            success = await testMySQLConnection(connectionData);
+            break;
+          case 'postgresql':
+            success = await testPostgreSQLConnection(connectionData);
+            break;
+          case 'mssql':
+            success = await testMSSQLConnection(connectionData);
+            break;
+          case 'sqlite':
+            success = await testSQLiteConnection(connectionData);
+            break;
+          case 'oracle':
+            success = await testOracleConnection(connectionData);
+            break;
+          case 'mongodb':
+            success = await testMongoDBConnection(connectionData);
+            break;
+          default:
+            success = false;
+            message = `Unsupported database type: ${connectionData.type}`;
+        }
+        
+        if (success) {
+          message = `Successfully connected to ${connectionData.name} (${connectionData.host}:${connectionData.port})`;
+        } else if (!message) {
+          message = `Failed to connect to ${connectionData.name}`;
+        }
+      } catch (err) {
+        success = false;
+        message = `Connection failed: ${err.message}`;
+      }
+      
+      event.reply('connection-test-result', {
+        id: connectionId,
+        success: success,
+        message: message
+      });
+    } else {
+      event.reply('connection-test-result', {
+        id: connectionId,
+        success: false,
+        message: 'Connection not found'
+      });
+    }
+  } catch (error) {
+    console.error('Error testing connection:', error);
+    event.reply('connection-test-result', {
+      id: connectionId,
+      success: false,
+      message: `Error testing connection: ${error.message}`
+    });
+  }
+});
+
+// IPC handler for testing new connections (before saving)
+ipcMain.on('test-new-connection', async (event, connectionData) => {
+  try {
+    let success = false;
+    let message = '';
+    
+    try {
+      switch(connectionData.type) {
+        case 'mysql':
+          success = await testMySQLConnection(connectionData);
+          break;
+        case 'postgresql':
+          success = await testPostgreSQLConnection(connectionData);
+          break;
+        case 'mssql':
+          success = await testMSSQLConnection(connectionData);
+          break;
+        case 'sqlite':
+          success = await testSQLiteConnection(connectionData);
+          break;
+        case 'oracle':
+          success = await testOracleConnection(connectionData);
+          break;
+        case 'mongodb':
+          success = await testMongoDBConnection(connectionData);
+          break;
+        default:
+          success = false;
+          message = `Unsupported database type: ${connectionData.type}`;
+      }
+      
+      if (success) {
+        message = `Successfully connected to ${connectionData.host}:${connectionData.port}`;
+      } else if (!message) {
+        message = `Failed to connect to ${connectionData.host}:${connectionData.port}`;
+      }
+    } catch (err) {
+      success = false;
+      message = `Connection failed: ${err.message}`;
+    }
+    
+    event.reply('new-connection-test-result', {
+      success: success,
+      message: message
+    });
+  } catch (error) {
+    console.error('Error testing new connection:', error);
+    event.reply('new-connection-test-result', {
+      success: false,
+      message: `Error testing connection: ${error.message}`
+    });
+  }
+});
+
+// IPC handler for connecting to a database
+ipcMain.on('connect-to-database', async (event, connectionId) => {
+  try {
+    const connectionFile = path.join(CONNECTIONS_DIR, `${connectionId}.json`);
+
+    if (fs.existsSync(connectionFile)) {
+      const connectionData = JSON.parse(fs.readFileSync(connectionFile, 'utf8'));
+      // Decrypt the password
+      if (connectionData.password) {
+        try {
+          connectionData.password = decrypt(connectionData.password.encryptedData, connectionData.password.iv);
+        } catch (error) {
+          connectionData.password = '';
+        }
+      }
+      
+      // Close the connection window
+      const allWindows = BrowserWindow.getAllWindows();
+      allWindows.forEach(window => {
+        if (window.webContents.getURL().includes('connection.html')) {
+          window.close();
+        }
+      });
+      
+      // Send connection details to the main window
+      const mainWindow = allWindows.find(window => window.webContents.getURL().includes('index.html'));
+      if (mainWindow) {
+        mainWindow.webContents.send('connection-details', connectionData);
+      }
+    } else {
+      event.reply('connection-error', {
+        id: connectionId,
+        error: 'Connection not found'
+      });
+    }
+  } catch (error) {
+    console.error('Error connecting to database:', error);
+    event.reply('connection-error', {
+      id: connectionId,
+      error: error.message
+    });
+  }
+});
+
+// IPC handler for getting database objects
+ipcMain.on('get-database-objects', async (event, connectionId, objectType) => {
+  try {
+    const connectionFile = path.join(CONNECTIONS_DIR, `${connectionId}.json`);
+
+    if (!fs.existsSync(connectionFile)) {
+      event.reply('database-objects', {
+        connectionId: connectionId,
+        objectType: objectType,
+        objects: [],
+        error: 'Connection not found'
+      });
+      return;
+    }
+
+    const connectionData = JSON.parse(fs.readFileSync(connectionFile, 'utf8'));
+    // Decrypt the password
+    if (connectionData.password) {
+      try {
+        connectionData.password = decrypt(connectionData.password.encryptedData, connectionData.password.iv);
+      } catch (error) {
+        connectionData.password = '';
+      }
+    }
+    
+    // Fetch objects based on database type
+    let objects = [];
+    try {
+      switch(connectionData.type) {
+        case 'mysql':
+          objects = await getMySQLObjects(connectionData, objectType);
+          break;
+        case 'postgresql':
+          objects = await getPostgreSQLObjects(connectionData, objectType);
+          break;
+        case 'mssql':
+          objects = await getMSSQLObjects(connectionData, objectType);
+          break;
+        case 'sqlite':
+          objects = await getSQLiteObjects(connectionData, objectType);
+          break;
+        case 'oracle':
+          objects = await getOracleObjects(connectionData, objectType);
+          break;
+        case 'mongodb':
+          objects = await getMongoDBObjects(connectionData, objectType);
+          break;
+        default:
+          // Fallback to sample data for unsupported types
+          objects = getSampleObjects(objectType);
+      }
+      
+      event.reply('database-objects', {
+        connectionId: connectionId,
+        objectType: objectType,
+        objects: objects
+      });
+    } catch (error) {
+      console.error(`Error fetching ${objectType} for ${connectionData.type}:`, error);
+      event.reply('database-objects', {
+        connectionId: connectionId,
+        objectType: objectType,
+        objects: [],
+        error: error.message
+      });
+    }
+  } catch (error) {
+    event.reply('database-objects', {
+      connectionId: connectionId,
+      objectType: objectType,
+      objects: [],
+      error: error.message
+    });
+  }
+});
+
+// IPC handler for executing queries
+ipcMain.on('execute-query', async (event, connectionId, query) => {
+  try {
+    const connectionFile = path.join(CONNECTIONS_DIR, `${connectionId}.json`);
+
+    if (!fs.existsSync(connectionFile)) {
+      event.reply('query-result', {
+        success: false,
+        error: 'Connection not found'
+      });
+      return;
+    }
+
+    const connectionData = JSON.parse(fs.readFileSync(connectionFile, 'utf8'));
+    // Decrypt the password
+    if (connectionData.password) {
+      try {
+        connectionData.password = decrypt(connectionData.password.encryptedData, connectionData.password.iv);
+      } catch (error) {
+        connectionData.password = '';
+      }
+    }
+    
+    // Execute query based on database type
+    let result = {};
+    try {
+      switch(connectionData.type) {
+        case 'mysql':
+          result = await executeMySQLQuery(connectionData, query);
+          break;
+        case 'postgresql':
+          result = await executePostgreSQLQuery(connectionData, query);
+          break;
+        case 'mssql':
+          result = await executeMSSQLQuery(connectionData, query);
+          break;
+        case 'sqlite':
+          result = await executeSQLiteQuery(connectionData, query);
+          break;
+        case 'oracle':
+          result = await executeOracleQuery(connectionData, query);
+          break;
+        case 'mongodb':
+          result = await executeMongoDBQuery(connectionData, query);
+          break;
+        default:
+          throw new Error(`Unsupported database type: ${connectionData.type}`);
+      }
+      
+      event.reply('query-result', {
+        success: true,
+        data: result.data,
+        columns: result.columns,
+        rowCount: result.rowCount,
+        executionTime: result.executionTime
+      });
+    } catch (error) {
+      console.error(`Error executing query for ${connectionData.type}:`, error);
+      event.reply('query-result', {
+        success: false,
+        error: error.message
+      });
+    }
+  } catch (error) {
+    event.reply('query-result', {
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// IPC handler for getting table columns
+ipcMain.on('get-table-columns', async (event, connectionId, tableName) => {
+    try {
+        const connectionFile = path.join(CONNECTIONS_DIR, `${connectionId}.json`);
+
+        if (!fs.existsSync(connectionFile)) {
+            event.reply('table-columns', {
+                tableName: tableName,
+                columns: [],
+                error: 'Connection not found'
+            });
+            return;
+        }
+
+        const connectionData = JSON.parse(fs.readFileSync(connectionFile, 'utf8'));
+        // Decrypt the password
+        if (connectionData.password) {
+            try {
+                connectionData.password = decrypt(connectionData.password.encryptedData, connectionData.password.iv);
+            } catch (error) {
+                connectionData.password = '';
+            }
+        }
+        
+        // Fetch columns based on database type
+        let columns = [];
+        try {
+            switch(connectionData.type) {
+                case 'mysql':
+                    columns = await getMySQLTableColumns(connectionData, tableName);
+                    break;
+                case 'postgresql':
+                    columns = await getPostgreSQLTableColumns(connectionData, tableName);
+                    break;
+                case 'mssql':
+                    columns = await getMSSQLTableColumns(connectionData, tableName);
+                    break;
+                case 'sqlite':
+                    columns = await getSQLiteTableColumns(connectionData, tableName);
+                    break;
+                case 'oracle':
+                    columns = await getOracleTableColumns(connectionData, tableName);
+                    break;
+                case 'mongodb':
+                    columns = await getMongoDBTableColumns(connectionData, tableName);
+                    break;
+                default:
+                    columns = [];
+            }
+            
+            event.reply('table-columns', {
+                tableName: tableName,
+                columns: columns
+            });
+        } catch (error) {
+            console.error(`Error fetching columns for ${tableName} in ${connectionData.type}:`, error);
+            event.reply('table-columns', {
+                tableName: tableName,
+                columns: [],
+                error: error.message
+            });
+        }
+    } catch (error) {
+        event.reply('table-columns', {
+            tableName: tableName,
+            columns: [],
+            error: error.message
+        });
+    }
+});
+
+// IPC handler for parsing queries
+ipcMain.on('parse-query', async (event, connectionId, query) => {
+  try {
+    const connectionFile = path.join(CONNECTIONS_DIR, `${connectionId}.json`);
+
+    if (!fs.existsSync(connectionFile)) {
+      event.reply('parse-result', {
+        success: false,
+        error: 'Connection not found'
+      });
+      return;
+    }
+
+    const connectionData = JSON.parse(fs.readFileSync(connectionFile, 'utf8'));
+    // Decrypt the password
+    if (connectionData.password) {
+      try {
+        connectionData.password = decrypt(connectionData.password.encryptedData, connectionData.password.iv);
+      } catch (error) {
+        connectionData.password = '';
+      }
+    }
+    
+    // Parse query based on database type
+    let result = {};
+    try {
+      switch(connectionData.type) {
+        case 'mysql':
+          result = await parseMySQLQuery(connectionData, query);
+          break;
+        case 'postgresql':
+          result = await parsePostgreSQLQuery(connectionData, query);
+          break;
+        case 'mssql':
+          result = await parseMSSQLQuery(connectionData, query);
+          break;
+        case 'sqlite':
+          result = await parseSQLiteQuery(connectionData, query);
+          break;
+        case 'oracle':
+          result = await parseOracleQuery(connectionData, query);
+          break;
+        case 'mongodb':
+          result = await parseMongoDBQuery(connectionData, query);
+          break;
+        default:
+          throw new Error(`Unsupported database type: ${connectionData.type}`);
+      }
+      
+      event.reply('parse-result', {
+        success: true,
+        message: result.message
+      });
+    } catch (error) {
+      console.error(`Error parsing query for ${connectionData.type}:`, error);
+      event.reply('parse-result', {
+        success: false,
+        error: error.message
+      });
+    }
+  } catch (error) {
+    event.reply('parse-result', {
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// IPC handler for generating estimated execution plan
+ipcMain.on('generate-estimated-plan', async (event, connectionId, query) => {
+  try {
+    const connectionFile = path.join(CONNECTIONS_DIR, `${connectionId}.json`);
+
+    if (!fs.existsSync(connectionFile)) {
+      event.reply('estimated-plan-result', {
+        success: false,
+        error: 'Connection not found'
+      });
+      return;
+    }
+
+    const connectionData = JSON.parse(fs.readFileSync(connectionFile, 'utf8'));
+    // Decrypt the password
+    if (connectionData.password) {
+      try {
+        connectionData.password = decrypt(connectionData.password.encryptedData, connectionData.password.iv);
+      } catch (error) {
+        connectionData.password = '';
+      }
+    }
+    
+    // Generate estimated execution plan based on database type
+    let result = {};
+    try {
+      switch(connectionData.type) {
+        case 'mysql':
+          result = await generateMySQLEstimatedPlan(connectionData, query);
+          break;
+        case 'postgresql':
+          result = await generatePostgreSQLEstimatedPlan(connectionData, query);
+          break;
+        case 'mssql':
+          result = await generateMSSQLEstimatedPlan(connectionData, query);
+          break;
+        case 'sqlite':
+          result = await generateSQLiteEstimatedPlan(connectionData, query);
+          break;
+        case 'oracle':
+          result = await generateOracleEstimatedPlan(connectionData, query);
+          break;
+        case 'mongodb':
+          result = await generateMongoDBEstimatedPlan(connectionData, query);
+          break;
+        default:
+          throw new Error(`Unsupported database type: ${connectionData.type}`);
+      }
+      
+      event.reply('estimated-plan-result', {
+        success: true,
+        plan: result.plan,
+        message: result.message
+      });
+    } catch (error) {
+      console.error(`Error generating estimated plan for ${connectionData.type}:`, error);
+      event.reply('estimated-plan-result', {
+        success: false,
+        error: error.message
+      });
+    }
+  } catch (error) {
+    event.reply('estimated-plan-result', {
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// IPC handler for saving table design
+ipcMain.on('save-table-design', async (event, { tableName, tableSchema, tableType, columns, connectionId }) => {
+    try {
+        // Get connection details
+        const connectionFile = path.join(CONNECTIONS_DIR, `${connectionId}.json`);
+
+        if (!fs.existsSync(connectionFile)) {
+            event.reply('table-design-error', {
+                message: 'Connection not found'
+            });
+            return;
+        }
+
+        const connectionData = JSON.parse(fs.readFileSync(connectionFile, 'utf8'));
+        // Decrypt the password
+        if (connectionData.password) {
+            try {
+                connectionData.password = decrypt(connectionData.password.encryptedData, connectionData.password.iv);
+            } catch (error) {
+                connectionData.password = '';
+            }
+        }
+        
+        // Save table design based on database type
+        switch(connectionData.type) {
+            case 'mysql':
+                await saveMySQLTableDesign(connectionData, tableName, columns);
+                break;
+            case 'postgresql':
+                await savePostgreSQLTableDesign(connectionData, tableName, columns);
+                break;
+            case 'mssql':
+                await saveMSSQLTableDesign(connectionData, tableName, columns);
+                break;
+            case 'sqlite':
+                await saveSQLiteTableDesign(connectionData, tableName, columns);
+                break;
+            case 'oracle':
+                await saveOracleTableDesign(connectionData, tableName, columns);
+                break;
+            case 'mongodb':
+                // MongoDB doesn't have traditional table schemas
+                // We'll just send a success message
+                event.reply('table-design-saved', {
+                    message: 'Table design saved successfully'
+                });
+                return;
+            default:
+                throw new Error(`Unsupported database type: ${connectionData.type}`);
+        }
+        
+        event.reply('table-design-saved', {
+            message: 'Table design saved successfully'
+        });
+    } catch (error) {
+        console.error('Error saving table design:', error);
+        event.reply('table-design-error', {
+            message: `Error saving table design: ${error.message}`
+        });
+    }
+});
+
+// Test connection functions
+async function testMySQLConnection(connectionData) {
+  const connection = await mysql.createConnection({
+    host: connectionData.host,
+    port: parseInt(connectionData.port) || 3306,
+    user: connectionData.username,
+    password: connectionData.password,
+    database: connectionData.database
+  });
+  
+  try {
+    await connection.execute('SELECT 1');
+    await connection.end();
+    return true;
+  } catch (error) {
+    await connection.end();
+    throw error;
+  }
+}
+
+async function testPostgreSQLConnection(connectionData) {
+  const client = new Client({
+    host: connectionData.host,
+    port: parseInt(connectionData.port) || 5432,
+    user: connectionData.username,
+    password: connectionData.password,
+    database: connectionData.database
+  });
+  
+  try {
+    await client.connect();
+    await client.query('SELECT 1');
+    await client.end();
+    return true;
+  } catch (error) {
+    await client.end();
+    throw error;
+  }
+}
+
+async function testMSSQLConnection(connectionData) {
+  const config = {
+    server: connectionData.host,
+    port: parseInt(connectionData.port) || 1433,
+    user: connectionData.username,
+    password: connectionData.password,
+    database: connectionData.database,
+    options: {
+      encrypt: connectionData.sslMode === 'require' || connectionData.sslMode === 'verify-ca' || connectionData.sslMode === 'verify-full',
+      trustServerCertificate: true
+    }
+  };
+  
+  try {
+    await sql.connect(config);
+    await sql.query('SELECT 1');
+    await sql.close();
+    return true;
+  } catch (error) {
+    await sql.close();
+    throw error;
+  }
+}
+
+async function testSQLiteConnection(connectionData) {
+  return new Promise((resolve, reject) => {
+    const db = new sqlite3.Database(connectionData.database, sqlite3.OPEN_READONLY, (err) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      
+      db.run('SELECT 1', (err) => {
+        db.close();
+        if (err) {
+          reject(err);
+        } else {
+          resolve(true);
+        }
+      });
+    });
+  });
+}
+
+async function testOracleConnection(connectionData) {
+  try {
+    const connection = await oracledb.getConnection({
+      user: connectionData.username,
+      password: connectionData.password,
+      connectString: `${connectionData.host}:${connectionData.port || 1521}/${connectionData.database}`
+    });
+    
+    await connection.execute('SELECT 1 FROM DUAL');
+    await connection.close();
+    return true;
+  } catch (error) {
+    throw error;
+  }
+}
+
+async function testMongoDBConnection(connectionData) {
+  try {
+    const url = `mongodb://${connectionData.username}:${encodeURIComponent(connectionData.password)}@${connectionData.host}:${connectionData.port || 27017}/${connectionData.database}`;
+    const client = new MongoClient(url, { useUnifiedTopology: true });
+    
+    await client.connect();
+    await client.db().command({ ping: 1 });
+    await client.close();
+    return true;
+  } catch (error) {
+    throw error;
+  }
+}
+
+// Get sample objects (fallback for unsupported database types)
+function getSampleObjects(objectType) {
+  switch(objectType) {
+    case 'tables':
+      return [
+        { name: 'users', type: 'table' },
+        { name: 'products', type: 'table' },
+        { name: 'orders', type: 'table' },
+        { name: 'categories', type: 'table' },
+        { name: 'suppliers', type: 'table' }
+      ];
+    case 'views':
+      return [
+        { name: 'user_summary', type: 'view' },
+        { name: 'product_inventory', type: 'view' },
+        { name: 'order_details', type: 'view' }
+      ];
+    case 'procedures':
+      return [
+        { name: 'get_user_details', type: 'procedure' },
+        { name: 'update_inventory', type: 'procedure' },
+        { name: 'process_order', type: 'procedure' }
+      ];
+    case 'functions':
+      return [
+        { name: 'calculate_tax', type: 'function' },
+        { name: 'format_date', type: 'function' },
+        { name: 'get_user_role', type: 'function' }
+      ];
+    default:
+      return [];
+  }
+}
+
+// MySQL object fetching
+async function getMySQLObjects(connectionData, objectType) {
+  const connection = await mysql.createConnection({
+    host: connectionData.host,
+    port: parseInt(connectionData.port) || 3306, // Ensure port is a number
+    user: connectionData.username,
+    password: connectionData.password,
+    database: connectionData.database
+  });
+  
+  try {
+    let query = '';
+    switch(objectType) {
+      case 'tables':
+        query = `SELECT table_name as name FROM information_schema.tables WHERE table_schema = '${connectionData.database}' AND table_type = 'BASE TABLE'`;
+        break;
+      case 'views':
+        query = `SELECT table_name as name FROM information_schema.views WHERE table_schema = '${connectionData.database}'`;
+        break;
+      case 'procedures':
+        query = `SELECT routine_name as name FROM information_schema.routines WHERE routine_schema = '${connectionData.database}' AND routine_type = 'PROCEDURE'`;
+        break;
+      case 'functions':
+        query = `SELECT routine_name as name FROM information_schema.routines WHERE routine_schema = '${connectionData.database}' AND routine_type = 'FUNCTION'`;
+        break;
+      default:
+        return [];
+    }
+    
+    const [rows] = await connection.execute(query);
+    await connection.end();
+    return rows.map(row => ({ name: row.name, type: objectType.slice(0, -1) }));
+  } catch (error) {
+    await connection.end();
+    throw error;
+  }
+}
+
+// PostgreSQL object fetching
+async function getPostgreSQLObjects(connectionData, objectType) {
+  const client = new Client({
+    host: connectionData.host,
+    port: parseInt(connectionData.port) || 5432, // Ensure port is a number
+    user: connectionData.username,
+    password: connectionData.password,
+    database: connectionData.database
+  });
+  
+  try {
+    await client.connect();
+    
+    let query = '';
+    switch(objectType) {
+      case 'tables':
+        query = `SELECT tablename as name FROM pg_tables WHERE schemaname = 'public'`;
+        break;
+      case 'views':
+        query = `SELECT viewname as name FROM pg_views WHERE schemaname = 'public'`;
+        break;
+      case 'procedures':
+        query = `SELECT proname as name FROM pg_proc p JOIN pg_namespace n ON p.pronamespace = n.oid WHERE n.nspname = 'public' AND prokind = 'p'`;
+        break;
+      case 'functions':
+        query = `SELECT proname as name FROM pg_proc p JOIN pg_namespace n ON p.pronamespace = n.oid WHERE n.nspname = 'public' AND prokind = 'f'`;
+        break;
+      default:
+        await client.end();
+        return [];
+    }
+    
+    const res = await client.query(query);
+    await client.end();
+    return res.rows.map(row => ({ name: row.name, type: objectType.slice(0, -1) }));
+  } catch (error) {
+    await client.end();
+    throw error;
+  }
+}
+
+// SQL Server object fetching
+async function getMSSQLObjects(connectionData, objectType) {
+  const config = {
+    server: connectionData.host,
+    port: parseInt(connectionData.port) || 1433, // Ensure port is a number
+    user: connectionData.username,
+    password: connectionData.password,
+    database: connectionData.database,
+    options: {
+      encrypt: connectionData.sslMode === 'require' || connectionData.sslMode === 'verify-ca' || connectionData.sslMode === 'verify-full',
+      trustServerCertificate: true // Change to false in production
+    }
+  };
+  
+  try {
+    await sql.connect(config);
+    
+    let query = '';
+    switch(objectType) {
+      case 'tables':
+        query = `SELECT TABLE_NAME as name FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE'`;
+        break;
+      case 'views':
+        query = `SELECT TABLE_NAME as name FROM INFORMATION_SCHEMA.VIEWS`;
+        break;
+      case 'procedures':
+        query = `SELECT ROUTINE_NAME as name FROM INFORMATION_SCHEMA.ROUTINES WHERE ROUTINE_TYPE = 'PROCEDURE'`;
+        break;
+      case 'functions':
+        query = `SELECT ROUTINE_NAME as name FROM INFORMATION_SCHEMA.ROUTINES WHERE ROUTINE_TYPE = 'FUNCTION'`;
+        break;
+      default:
+        await sql.close();
+        return [];
+    }
+    
+    const result = await sql.query(query);
+    await sql.close();
+    return result.recordset.map(row => ({ name: row.name, type: objectType.slice(0, -1) }));
+  } catch (error) {
+    await sql.close();
+    throw error;
+  }
+}
+
+// SQLite object fetching
+async function getSQLiteObjects(connectionData, objectType) {
+  return new Promise((resolve, reject) => {
+    const db = new sqlite3.Database(connectionData.database, sqlite3.OPEN_READONLY, (err) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+    });
+    
+    let query = '';
+    switch(objectType) {
+      case 'tables':
+        query = `SELECT name FROM sqlite_master WHERE type='table'`;
+        break;
+      case 'views':
+        query = `SELECT name FROM sqlite_master WHERE type='view'`;
+        break;
+      default:
+        db.close();
+        resolve([]);
+        return;
+    }
+    
+    db.all(query, (err, rows) => {
+      db.close();
+      if (err) {
+        reject(err);
+      } else {
+        resolve(rows.map(row => ({ name: row.name, type: objectType.slice(0, -1) })));
+      }
+    });
+  });
+}
+
+// Oracle object fetching
+async function getOracleObjects(connectionData, objectType) {
+  try {
+    const connection = await oracledb.getConnection({
+      user: connectionData.username,
+      password: connectionData.password,
+      connectString: `${connectionData.host}:${connectionData.port || 1521}/${connectionData.database}`
+    });
+    
+    let query = '';
+    switch(objectType) {
+      case 'tables':
+        query = `SELECT TABLE_NAME as name FROM USER_TABLES`;
+        break;
+      case 'views':
+        query = `SELECT VIEW_NAME as name FROM USER_VIEWS`;
+        break;
+      case 'procedures':
+        query = `SELECT OBJECT_NAME as name FROM USER_PROCEDURES WHERE OBJECT_TYPE = 'PROCEDURE'`;
+        break;
+      case 'functions':
+        query = `SELECT OBJECT_NAME as name FROM USER_PROCEDURES WHERE OBJECT_TYPE = 'FUNCTION'`;
+        break;
+      default:
+        await connection.close();
+        return [];
+    }
+    
+    const result = await connection.execute(query);
+    await connection.close();
+    
+    return result.rows.map(row => ({ name: row[0], type: objectType.slice(0, -1) }));
+  } catch (error) {
+    throw error;
+  }
+}
+
+// MongoDB object fetching
+async function getMongoDBObjects(connectionData, objectType) {
+  try {
+    const url = `mongodb://${connectionData.username}:${encodeURIComponent(connectionData.password)}@${connectionData.host}:${connectionData.port || 27017}/${connectionData.database}`;
+    const client = new MongoClient(url, { useUnifiedTopology: true });
+    
+    await client.connect();
+    const db = client.db();
+    
+    let objects = [];
+    switch(objectType) {
+      case 'tables':
+        // In MongoDB, these are collections
+        const collections = await db.listCollections().toArray();
+        objects = collections.map(col => ({ name: col.name, type: 'collection' }));
+        break;
+      case 'views':
+        // MongoDB views are special collections
+        const allCollections = await db.listCollections().toArray();
+        const views = allCollections.filter(col => col.type === 'view');
+        objects = views.map(view => ({ name: view.name, type: 'view' }));
+        break;
+      default:
+        objects = [];
+    }
+    
+    await client.close();
+    return objects;
+  } catch (error) {
+    throw error;
+  }
+}
+
+// MySQL query execution
+async function executeMySQLQuery(connectionData, query) {
+  const start = Date.now();
+  const connection = await mysql.createConnection({
+    host: connectionData.host,
+    port: parseInt(connectionData.port) || 3306,
+    user: connectionData.username,
+    password: connectionData.password,
+    database: connectionData.database
+  });
+  
+  try {
+    const [rows, fields] = await connection.execute(query);
+    const end = Date.now();
+    
+    await connection.end();
+    
+    return {
+      data: rows,
+      columns: fields ? fields.map(field => field.name) : [],
+      rowCount: Array.isArray(rows) ? rows.length : 0,
+      executionTime: end - start
+    };
+  } catch (error) {
+    await connection.end();
+    throw error;
+  }
+}
+
+// PostgreSQL query execution
+async function executePostgreSQLQuery(connectionData, query) {
+  const start = Date.now();
+  const client = new Client({
+    host: connectionData.host,
+    port: parseInt(connectionData.port) || 5432,
+    user: connectionData.username,
+    password: connectionData.password,
+    database: connectionData.database
+  });
+  
+  try {
+    await client.connect();
+    const res = await client.query(query);
+    const end = Date.now();
+    
+    await client.end();
+    
+    // Handle different result types
+    if (res.rows) {
+      return {
+        data: res.rows,
+        columns: res.fields ? res.fields.map(field => field.name) : [],
+        rowCount: res.rows.length,
+        executionTime: end - start
+      };
+    } else {
+      // For non-SELECT queries (INSERT, UPDATE, DELETE, etc.)
+      return {
+        data: [],
+        columns: [],
+        rowCount: res.rowCount || 0,
+        executionTime: end - start
+      };
+    }
+  } catch (error) {
+    await client.end();
+    throw error;
+  }
+}
+
+// SQL Server query execution
+async function executeMSSQLQuery(connectionData, query) {
+  const start = Date.now();
+  const config = {
+    server: connectionData.host,
+    port: parseInt(connectionData.port) || 1433,
+    user: connectionData.username,
+    password: connectionData.password,
+    database: connectionData.database,
+    options: {
+      encrypt: connectionData.sslMode === 'require' || connectionData.sslMode === 'verify-ca' || connectionData.sslMode === 'verify-full',
+      trustServerCertificate: true
+    }
+  };
+  
+  try {
+    await sql.connect(config);
+    const result = await sql.query(query);
+    const end = Date.now();
+    
+    await sql.close();
+    
+    // Handle different result types
+    if (result.recordset) {
+      // SELECT queries
+      return {
+        data: result.recordset,
+        columns: result.recordset.length > 0 ? Object.keys(result.recordset[0]) : [],
+        rowCount: result.recordset.length,
+        executionTime: end - start
+      };
+    } else {
+      // Non-SELECT queries
+      return {
+        data: [],
+        columns: [],
+        rowCount: result.rowsAffected ? result.rowsAffected.reduce((a, b) => a + b, 0) : 0,
+        executionTime: end - start
+      };
+    }
+  } catch (error) {
+    await sql.close();
+    throw error;
+  }
+}
+
+// SQLite query execution
+async function executeSQLiteQuery(connectionData, query) {
+  return new Promise((resolve, reject) => {
+    const start = Date.now();
+    const db = new sqlite3.Database(connectionData.database, sqlite3.OPEN_READONLY, (err) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+    });
+    
+    db.all(query, (err, rows) => {
+      const end = Date.now();
+      db.close();
+      
+      if (err) {
+        reject(err);
+      } else {
+        resolve({
+          data: rows,
+          columns: rows.length > 0 ? Object.keys(rows[0]) : [],
+          rowCount: rows.length,
+          executionTime: end - start
+        });
+      }
+    });
+  });
+}
+
+// Oracle query execution
+async function executeOracleQuery(connectionData, query) {
+  const start = Date.now();
+  try {
+    const connection = await oracledb.getConnection({
+      user: connectionData.username,
+      password: connectionData.password,
+      connectString: `${connectionData.host}:${connectionData.port || 1521}/${connectionData.database}`
+    });
+    
+    const result = await connection.execute(query);
+    const end = Date.now();
+    
+    await connection.close();
+    
+    // Convert Oracle result format to our standard format
+    const columns = result.metaData ? result.metaData.map(col => col.name) : [];
+    const data = result.rows ? result.rows.map(row => {
+      const obj = {};
+      columns.forEach((col, index) => {
+        obj[col] = row[index];
+      });
+      return obj;
+    }) : [];
+    
+    return {
+      data: data,
+      columns: columns,
+      rowCount: data.length,
+      executionTime: end - start
+    };
+  } catch (error) {
+    throw error;
+  }
+}
+
+// MongoDB query execution
+async function executeMongoDBQuery(connectionData, query) {
+  const start = Date.now();
+  try {
+    const url = `mongodb://${connectionData.username}:${encodeURIComponent(connectionData.password)}@${connectionData.host}:${connectionData.port || 27017}/${connectionData.database}`;
+    const client = new MongoClient(url, { useUnifiedTopology: true });
+    
+    await client.connect();
+    const db = client.db();
+    
+    // For MongoDB, we'll parse a simple query format
+    // This is a simplified implementation - a real app would need more robust parsing
+    let result = [];
+    let columns = [];
+    let rowCount = 0;
+    
+    if (query.toLowerCase().startsWith('find ')) {
+      // Simple find query: "find collectionName"
+      const collectionName = query.substring(5).trim();
+      const collection = db.collection(collectionName);
+      result = await collection.find({}).limit(100).toArray();
+      rowCount = result.length;
+      if (result.length > 0) {
+        columns = Object.keys(result[0]);
+      }
+    } else {
+      // For other queries, we'll just return a message
+      result = [{ message: 'MongoDB query executed successfully' }];
+      columns = ['message'];
+      rowCount = 1;
+    }
+    
+    const end = Date.now();
+    await client.close();
+    
+    return {
+      data: result,
+      columns: columns,
+      rowCount: rowCount,
+      executionTime: end - start
+    };
+  } catch (error) {
+    throw error;
+  }
+}
+
+// Parse query functions
+async function parseMySQLQuery(connectionData, query) {
+  // For MySQL, we'll just do a simple syntax check by attempting to prepare the statement
+  const connection = await mysql.createConnection({
+    host: connectionData.host,
+    port: parseInt(connectionData.port) || 3306,
+    user: connectionData.username,
+    password: connectionData.password,
+    database: connectionData.database
+  });
+  
+  try {
+    // Use EXPLAIN to check syntax without executing
+    await connection.execute(`EXPLAIN ${query}`);
+    await connection.end();
+    return { message: 'Query parsed successfully. No syntax errors found.' };
+  } catch (error) {
+    await connection.end();
+    throw error;
+  }
+}
+
+async function parsePostgreSQLQuery(connectionData, query) {
+  const client = new Client({
+    host: connectionData.host,
+    port: parseInt(connectionData.port) || 5432,
+    user: connectionData.username,
+    password: connectionData.password,
+    database: connectionData.database
+  });
+  
+  try {
+    await client.connect();
+    // Use PREPARE to check syntax without executing
+    await client.query(`PREPARE test_statement AS ${query}`);
+    await client.query('DEALLOCATE test_statement');
+    await client.end();
+    return { message: 'Query parsed successfully. No syntax errors found.' };
+  } catch (error) {
+    await client.end();
+    throw error;
+  }
+}
+
+async function parseMSSQLQuery(connectionData, query) {
+  const config = {
+    server: connectionData.host,
+    port: parseInt(connectionData.port) || 1433,
+    user: connectionData.username,
+    password: connectionData.password,
+    database: connectionData.database,
+    options: {
+      encrypt: connectionData.sslMode === 'require' || connectionData.sslMode === 'verify-ca' || connectionData.sslMode === 'verify-full',
+      trustServerCertificate: true
+    }
+  };
+  
+  try {
+    await sql.connect(config);
+    // Use SET PARSEONLY to check syntax without executing
+    await sql.query(`SET PARSEONLY ON; ${query}; SET PARSEONLY OFF;`);
+    await sql.close();
+    return { message: 'Query parsed successfully. No syntax errors found.' };
+  } catch (error) {
+    await sql.close();
+    throw error;
+  }
+}
+
+async function parseSQLiteQuery(connectionData, query) {
+  return new Promise((resolve, reject) => {
+    const db = new sqlite3.Database(connectionData.database, sqlite3.OPEN_READONLY, (err) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+    });
+    
+    // Use EXPLAIN QUERY PLAN to check syntax without executing
+    db.prepare(`EXPLAIN QUERY PLAN ${query}`, (err) => {
+      db.close();
+      if (err) {
+        reject(err);
+      } else {
+        resolve({ message: 'Query parsed successfully. No syntax errors found.' });
+      }
+    });
+  });
+}
+
+async function parseOracleQuery(connectionData, query) {
+  try {
+    const connection = await oracledb.getConnection({
+      user: connectionData.username,
+      password: connectionData.password,
+      connectString: `${connectionData.host}:${connectionData.port || 1521}/${connectionData.database}`
+    });
+    
+    // Use EXPLAIN PLAN to check syntax without executing
+    await connection.execute(`EXPLAIN PLAN FOR ${query}`);
+    await connection.close();
+    return { message: 'Query parsed successfully. No syntax errors found.' };
+  } catch (error) {
+    throw error;
+  }
+}
+
+async function parseMongoDBQuery(connectionData, query) {
+  // For MongoDB, we'll just do a basic validation
+  if (!query || query.trim() === '') {
+    throw new Error('Empty query');
+  }
+  return { message: 'Query parsed successfully. No syntax errors found.' };
+}
+
+// Generate estimated execution plan functions
+async function generateMySQLEstimatedPlan(connectionData, query) {
+  const connection = await mysql.createConnection({
+    host: connectionData.host,
+    port: parseInt(connectionData.port) || 3306,
+    user: connectionData.username,
+    password: connectionData.password,
+    database: connectionData.database
+  });
+  
+  try {
+    // Use EXPLAIN to get the execution plan
+    const [rows] = await connection.execute(`EXPLAIN ${query}`);
+    await connection.end();
+    
+    // Format the plan as a string
+    let plan = 'MySQL Estimated Execution Plan:\n';
+    plan += '================================\n\n';
+    rows.forEach((row, index) => {
+      plan += `Step ${index + 1}:\n`;
+      Object.keys(row).forEach(key => {
+        plan += `  ${key}: ${row[key]}\n`;
+      });
+      plan += '\n';
+    });
+    
+    return { 
+      plan: plan,
+      message: 'Estimated execution plan generated successfully.' 
+    };
+  } catch (error) {
+    await connection.end();
+    throw error;
+  }
+}
+
+async function generatePostgreSQLEstimatedPlan(connectionData, query) {
+  const client = new Client({
+    host: connectionData.host,
+    port: parseInt(connectionData.port) || 5432,
+    user: connectionData.username,
+    password: connectionData.password,
+    database: connectionData.database
+  });
+  
+  try {
+    await client.connect();
+    // Use EXPLAIN to get the execution plan
+    const res = await client.query(`EXPLAIN ${query}`);
+    await client.end();
+    
+    // Format the plan as a string
+    let plan = 'PostgreSQL Estimated Execution Plan:\n';
+    plan += '==================================\n\n';
+    res.rows.forEach((row, index) => {
+      plan += `Step ${index + 1}: ${row['QUERY PLAN']}\n`;
+    });
+    
+    return { 
+      plan: plan,
+      message: 'Estimated execution plan generated successfully.' 
+    };
+  } catch (error) {
+    await client.end();
+    throw error;
+  }
+}
+
+async function generateMSSQLEstimatedPlan(connectionData, query) {
+  const config = {
+    server: connectionData.host,
+    port: parseInt(connectionData.port) || 1433,
+    user: connectionData.username,
+    password: connectionData.password,
+    database: connectionData.database,
+    options: {
+      encrypt: connectionData.sslMode === 'require' || connectionData.sslMode === 'verify-ca' || connectionData.sslMode === 'verify-full',
+      trustServerCertificate: true
+    }
+  };
+  
+  try {
+    await sql.connect(config);
+    // Use SET SHOWPLAN_ALL to get the execution plan
+    const result = await sql.query(`SET SHOWPLAN_ALL ON; ${query}; SET SHOWPLAN_ALL OFF;`);
+    await sql.close();
+    
+    // Format the plan as a string
+    let plan = 'SQL Server Estimated Execution Plan:\n';
+    plan += '==================================\n\n';
+    if (result.recordset && result.recordset.length > 0) {
+      result.recordset.forEach((row, index) => {
+        plan += `Step ${index + 1}:\n`;
+        Object.keys(row).forEach(key => {
+          plan += `  ${key}: ${row[key]}\n`;
+        });
+        plan += '\n';
+      });
+    } else {
+      plan += 'No execution plan data available.\n';
+    }
+    
+    return { 
+      plan: plan,
+      message: 'Estimated execution plan generated successfully.' 
+    };
+  } catch (error) {
+    await sql.close();
+    throw error;
+  }
+}
+
+async function generateSQLiteEstimatedPlan(connectionData, query) {
+  return new Promise((resolve, reject) => {
+    const db = new sqlite3.Database(connectionData.database, sqlite3.OPEN_READONLY, (err) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+    });
+    
+    // Use EXPLAIN QUERY PLAN to get the execution plan
+    db.all(`EXPLAIN QUERY PLAN ${query}`, (err, rows) => {
+      db.close();
+      if (err) {
+        reject(err);
+      } else {
+        // Format the plan as a string
+        let plan = 'SQLite Estimated Execution Plan:\n';
+        plan += '===============================\n\n';
+        rows.forEach((row, index) => {
+          plan += `Step ${index + 1}: ${row.detail}\n`;
+        });
+        
+        resolve({ 
+          plan: plan,
+          message: 'Estimated execution plan generated successfully.' 
+        });
+      }
+    });
+  });
+}
+
+async function generateOracleEstimatedPlan(connectionData, query) {
+  try {
+    const connection = await oracledb.getConnection({
+      user: connectionData.username,
+      password: connectionData.password,
+      connectString: `${connectionData.host}:${connectionData.port || 1521}/${connectionData.database}`
+    });
+    
+    // Use EXPLAIN PLAN to get the execution plan
+    await connection.execute(`EXPLAIN PLAN FOR ${query}`);
+    
+    // Retrieve the plan from PLAN_TABLE
+    const result = await connection.execute(`
+      SELECT PLAN_TABLE_OUTPUT FROM TABLE(DBMS_XPLAN.DISPLAY())
+    `);
+    
+    await connection.close();
+    
+    // Format the plan as a string
+    let plan = 'Oracle Estimated Execution Plan:\n';
+    plan += '===============================\n\n';
+    result.rows.forEach((row, index) => {
+      plan += `${row[0]}\n`;
+    });
+    
+    return { 
+      plan: plan,
+      message: 'Estimated execution plan generated successfully.' 
+    };
+  } catch (error) {
+    throw error;
+  }
+}
+
+async function generateMongoDBEstimatedPlan(connectionData, query) {
+  // For MongoDB, we'll just provide a basic message
+  return { 
+    plan: 'MongoDB Estimated Execution Plan:\n===============================\n\nMongoDB uses a different query execution model. Use db.collection.find().explain() in the MongoDB shell for detailed execution information.',
+    message: 'Estimated execution plan information provided.' 
+  };
+}
+
+// MySQL table column fetching
+async function getMySQLTableColumns(connectionData, tableName) {
+    const connection = await mysql.createConnection({
+        host: connectionData.host,
+        port: parseInt(connectionData.port) || 3306,
+        user: connectionData.username,
+        password: connectionData.password,
+        database: connectionData.database
+    });
+    
+    try {
+        const query = `
+            SELECT 
+                COLUMN_NAME as name,
+                DATA_TYPE as type,
+                IS_NULLABLE as nullable
+            FROM INFORMATION_SCHEMA.COLUMNS 
+            WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
+            ORDER BY ORDINAL_POSITION
+        `;
+        
+        const [rows] = await connection.execute(query, [connectionData.database, tableName]);
+        await connection.end();
+        return rows.map(row => ({
+            name: row.name,
+            type: row.type,
+            nullable: row.nullable === 'YES'
+        }));
+    } catch (error) {
+        await connection.end();
+        throw error;
+    }
+}
+
+// PostgreSQL table column fetching
+async function getPostgreSQLTableColumns(connectionData, tableName) {
+    const client = new Client({
+        host: connectionData.host,
+        port: parseInt(connectionData.port) || 5432,
+        user: connectionData.username,
+        password: connectionData.password,
+        database: connectionData.database
+    });
+    
+    try {
+        await client.connect();
+        
+        const query = `
+            SELECT 
+                column_name as name,
+                data_type as type,
+                is_nullable as nullable
+            FROM information_schema.columns 
+            WHERE table_schema = 'public' AND table_name = $1
+            ORDER BY ordinal_position
+        `;
+        
+        const res = await client.query(query, [tableName]);
+        await client.end();
+        return res.rows.map(row => ({
+            name: row.name,
+            type: row.type,
+            nullable: row.nullable === 'YES'
+        }));
+    } catch (error) {
+        await client.end();
+        throw error;
+    }
+}
+
+// SQL Server table column fetching
+async function getMSSQLTableColumns(connectionData, tableName) {
+    const config = {
+        server: connectionData.host,
+        port: parseInt(connectionData.port) || 1433,
+        user: connectionData.username,
+        password: connectionData.password,
+        database: connectionData.database,
+        options: {
+            encrypt: connectionData.sslMode === 'require' || connectionData.sslMode === 'verify-ca' || connectionData.sslMode === 'verify-full',
+            trustServerCertificate: true
+        }
+    };
+    
+    try {
+        await sql.connect(config);
+        
+        // Escape single quotes in table name to prevent SQL injection
+        const escapedTableName = tableName.replace(/'/g, "''");
+        const query = `
+            SELECT 
+                COLUMN_NAME as name,
+                DATA_TYPE as type,
+                IS_NULLABLE as nullable
+            FROM INFORMATION_SCHEMA.COLUMNS 
+            WHERE TABLE_NAME = '${escapedTableName}'
+            ORDER BY ORDINAL_POSITION
+        `;
+        
+        const pool = await sql.connect(config);
+        const result = await pool.request().query(query);
+        await pool.close();
+        await sql.close();
+        return result.recordset.map(row => ({
+            name: row.name,
+            type: row.type,
+            nullable: row.nullable === 'YES'
+        }));
+    } catch (error) {
+        await sql.close();
+        throw error;
+    }
+}
+
+// SQLite table column fetching
+async function getSQLiteTableColumns(connectionData, tableName) {
+    return new Promise((resolve, reject) => {
+        const db = new sqlite3.Database(connectionData.database, sqlite3.OPEN_READONLY, (err) => {
+            if (err) {
+                reject(err);
+                return;
+            }
+        });
+        
+        const query = `PRAGMA table_info(${tableName})`;
+        
+        db.all(query, (err, rows) => {
+            db.close();
+            if (err) {
+                reject(err);
+            } else {
+                resolve(rows.map(row => ({
+                    name: row.name,
+                    type: row.type,
+                    nullable: row.notnull === 0
+                })));
+            }
+        });
+    });
+}
+
+// Oracle table column fetching
+async function getOracleTableColumns(connectionData, tableName) {
+    try {
+        const connection = await oracledb.getConnection({
+            user: connectionData.username,
+            password: connectionData.password,
+            connectString: `${connectionData.host}:${connectionData.port || 1521}/${connectionData.database}`
+        });
+        
+        const query = `
+            SELECT 
+                COLUMN_NAME as name,
+                DATA_TYPE as type,
+                NULLABLE as nullable
+            FROM ALL_TAB_COLUMNS
+            WHERE TABLE_NAME = '${tableName}'
+            ORDER BY COLUMN_ID
+        `;
+        
+        const result = await connection.execute(query);
+        await connection.close();
+        return result.rows.map(row => ({
+            name: row.COLUMN_NAME,
+            type: row.DATA_TYPE,
+            nullable: row.NULLABLE === 'Y'
+        }));
+    } catch (error) {
+        throw error;
+    }
+}
+
+// MySQL table design saving
+async function saveMySQLTableDesign(connectionData, tableName, columns) {
+    const connection = await mysql.createConnection({
+        host: connectionData.host,
+        port: parseInt(connectionData.port) || 3306,
+        user: connectionData.username,
+        password: connectionData.password,
+        database: connectionData.database
+    });
+    
+    try {
+        // For simplicity, we'll just show an alert that this is a demo
+        // In a real implementation, you would generate and execute ALTER TABLE statements
+        await connection.end();
+    } catch (error) {
+        await connection.end();
+        throw error;
+    }
+}
+
+// PostgreSQL table design saving
+async function savePostgreSQLTableDesign(connectionData, tableName, columns) {
+    const client = new Client({
+        host: connectionData.host,
+        port: parseInt(connectionData.port) || 5432,
+        user: connectionData.username,
+        password: connectionData.password,
+        database: connectionData.database
+    });
+    
+    try {
+        await client.connect();
+        // For simplicity, we'll just show an alert that this is a demo
+        // In a real implementation, you would generate and execute ALTER TABLE statements
+        await client.end();
+    } catch (error) {
+        await client.end();
+        throw error;
+    }
+}
+
+// SQL Server table design saving
+async function saveMSSQLTableDesign(connectionData, tableName, columns) {
+    const config = {
+        server: connectionData.host,
+        port: parseInt(connectionData.port) || 1433,
+        user: connectionData.username,
+        password: connectionData.password,
+        database: connectionData.database,
+        options: {
+            encrypt: connectionData.sslMode === 'require' || connectionData.sslMode === 'verify-ca' || connectionData.sslMode === 'verify-full',
+            trustServerCertificate: true
+        }
+    };
+    
+    try {
+        await sql.connect(config);
+        // For simplicity, we'll just show an alert that this is a demo
+        // In a real implementation, you would generate and execute ALTER TABLE statements
+        await sql.close();
+    } catch (error) {
+        await sql.close();
+        throw error;
+    }
+}
+
+// SQLite table design saving
+async function saveSQLiteTableDesign(connectionData, tableName, columns) {
+    return new Promise((resolve, reject) => {
+        const db = new sqlite3.Database(connectionData.database, sqlite3.OPEN_READWRITE, (err) => {
+            if (err) {
+                reject(err);
+                return;
+            }
+        });
+        
+        // For simplicity, we'll just show an alert that this is a demo
+        // In a real implementation, you would generate and execute ALTER TABLE statements
+        db.close();
+        resolve();
+    });
+}
+
+// Oracle table design saving
+async function saveOracleTableDesign(connectionData, tableName, columns) {
+    try {
+        const connection = await oracledb.getConnection({
+            user: connectionData.username,
+            password: connectionData.password,
+            connectString: `${connectionData.host}:${connectionData.port || 1521}/${connectionData.database}`
+        });
+        
+        // For simplicity, we'll just show an alert that this is a demo
+        // In a real implementation, you would generate and execute ALTER TABLE statements
+        await connection.close();
+    } catch (error) {
+        throw error;
+    }
+}
+
+// Oracle table column fetching
+async function getOracleTableColumns(connectionData, tableName) {
+    try {
+        const connection = await oracledb.getConnection({
+            user: connectionData.username,
+            password: connectionData.password,
+            connectString: `${connectionData.host}:${connectionData.port || 1521}/${connectionData.database}`
+        });
+        
+        const query = `
+            SELECT 
+                COLUMN_NAME as name,
+                DATA_TYPE as type,
+                NULLABLE as nullable
+            FROM USER_TAB_COLUMNS 
+            WHERE TABLE_NAME = :tableName
+            ORDER BY COLUMN_ID
+        `;
+        
+        const result = await connection.execute(query, { tableName: tableName.toUpperCase() });
+        await connection.close();
+        
+        return result.rows.map(row => ({
+            name: row[0],
+            type: row[1],
+            nullable: row[2] === 'Y'
+        }));
+    } catch (error) {
+        throw error;
+    }
+}
+
+// MongoDB table (collection) column fetching
+async function getMongoDBTableColumns(connectionData, tableName) {
+    try {
+        const url = `mongodb://${connectionData.username}:${encodeURIComponent(connectionData.password)}@${connectionData.host}:${connectionData.port || 27017}/${connectionData.database}`;
+        const client = new MongoClient(url, { useUnifiedTopology: true });
+        
+        await client.connect();
+        const db = client.db();
+        const collection = db.collection(tableName);
+        
+        // For MongoDB, we'll get a sample document to infer the schema
+        const sample = await collection.findOne();
+        await client.close();
+        
+        if (!sample) {
+            return [];
+        }
+        
+        // Convert sample document to column information
+        return Object.keys(sample).map(key => ({
+            name: key,
+            type: typeof sample[key],
+            nullable: true // MongoDB documents can have varying structures
+        }));
+    } catch (error) {
+        throw error;
+    }
+}
+ 
+

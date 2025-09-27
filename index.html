@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>DB Explorer</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- Menu Bar (Removed - using external menu only) -->
+
+    <div class="main-container">
+        <!-- Toolbar -->
+        <div class="toolbar">
+            <button class="toolbar-button" title="New Query">
+                <span class="toolbar-icon">📝</span>
+                <span class="toolbar-text">New Query</span>
+            </button>
+            <button class="toolbar-button" title="Open">
+                <span class="toolbar-icon">📂</span>
+                <span class="toolbar-text">Open</span>
+            </button>
+            <button class="toolbar-button" title="Save">
+                <span class="toolbar-icon">💾</span>
+                <span class="toolbar-text">Save</span>
+            </button>
+            <div class="toolbar-separator"></div>
+            <button class="toolbar-button" title="Execute">
+                <span class="toolbar-icon">▶</span>
+                <span class="toolbar-text">Execute</span>
+            </button>
+            <button class="toolbar-button" title="Stop">
+                <span class="toolbar-icon">⏹</span>
+                <span class="toolbar-text">Stop</span>
+            </button>
+            <div class="toolbar-separator"></div>
+            <button class="toolbar-button" id="connect-button" title="Connect">
+                <span class="toolbar-icon">🔗</span>
+                <span class="toolbar-text">Connect</span>
+            </button>
+            <button class="toolbar-button" id="manage-connections-button" title="Manage Connections">
+                <span class="toolbar-icon">⚙️</span>
+                <span class="toolbar-text">Manage Connections</span>
+            </button>
+        </div>
+
+        <!-- Main Content Area -->
+        <div class="content-area">
+            <!-- Object Explorer Panel (Left) -->
+            <div class="panel object-explorer">
+                <div class="panel-header">
+                    <span>Object Explorer</span>
+                </div>
+                <div class="panel-content">
+                    <div class="tree-view listview-style" id="object-explorer-tree">
+                        <!-- Treeview will be populated dynamically -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Document Area (Center) -->
+            <div class="document-area">
+                <div class="tabs">
+                    <button class="tab-nav-button tab-nav-prev" title="Previous Tab (Ctrl+Shift+Tab)" disabled>◀</button>
+                    <div class="tabs-container" id="tabs-container">
+                        <div class="tab active" data-tab-id="tab-1">
+                            <span class="tab-title">SQLQuery_1.sql</span>
+                            <span class="tab-close" title="Close Tab (Ctrl+W)">×</span>
+                        </div>
+                    </div>
+                    <button class="tab-nav-button tab-nav-next" title="Next Tab (Ctrl+Tab)" disabled>▶</button>
+                    <div class="tab-new" title="New Query (Ctrl+T)">+</div>
+                </div>
+                <div class="query-editor active" data-tab-id="tab-1">
+                    <textarea class="sql-editor" placeholder="Write your SQL query here..."> </textarea>
+                </div>
+                <div class="result-area">
+                    <div class="result-tabs">
+                        <div class="result-tab active" data-tab-type="results">Results</div>
+                        <div class="result-tab" data-tab-type="messages">Messages</div>
+                    </div>
+                    <div class="result-content active" data-tab-type="results">
+                        <table class="result-table">
+                           
+                        </table>
+                    </div>
+                    <div class="result-content" data-tab-type="messages">
+                        <div class="messages-content">
+                            <!-- Messages will be displayed here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Properties Panel (Right) - Fixed position -->
+            <div class="panel properties-panel">
+                <div class="panel-header">
+                    <span>Properties</span>
+                    <button class="properties-toggle" id="properties-toggle" title="Toggle Properties Panel">◀</button>
+                </div>
+                <div class="panel-content">
+                    <div class="property-item">
+                        <label>Name:</label>
+                        <span>users</span>
+                    </div>
+                    <div class="property-item">
+                        <label>Schema:</label>
+                        <span>dbo</span>
+                    </div>
+                    <div class="property-item">
+                        <label>Type:</label>
+                        <span>User Table</span>
+                    </div>
+                    <div class="property-item">
+                        <label>Created:</label>
+                        <span>2023-01-01</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Status Bar -->
+        <div class="status-bar">
+            <div class="status-item" id="status-main">Ready</div>
+            <div class="status-item" id="status-records">0 records</div>
+            <div class="status-item" id="status-encoding">UTF-8</div>
+        </div>
+    </div>
+
+    <script src="renderer.js"></script>
+</body>
+</html>
