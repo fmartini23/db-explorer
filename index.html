@@ -11,36 +11,57 @@
     <div class="main-container">
         <!-- Toolbar -->
         <div class="toolbar">
-            <button class="toolbar-button" title="New Query">
-                <span class="toolbar-icon">📝</span>
-                <span class="toolbar-text">New Query</span>
-            </button>
-            <button class="toolbar-button" title="Open">
-                <span class="toolbar-icon">📂</span>
-                <span class="toolbar-text">Open</span>
-            </button>
-            <button class="toolbar-button" title="Save">
-                <span class="toolbar-icon">💾</span>
-                <span class="toolbar-text">Save</span>
-            </button>
+            <div class="toolbar-group">
+                <button class="toolbar-button" title="New Query">
+                    <span class="toolbar-icon">📝</span>
+                    <span class="toolbar-text">New Query</span>
+                </button>
+                <button class="toolbar-button" title="Open">
+                    <span class="toolbar-icon">📂</span>
+                    <span class="toolbar-text">Open</span>
+                </button>
+                <button class="toolbar-button" title="Save">
+                    <span class="toolbar-icon">💾</span>
+                    <span class="toolbar-text">Save</span>
+                </button>
+            </div>
             <div class="toolbar-separator"></div>
-            <button class="toolbar-button" title="Execute">
-                <span class="toolbar-icon">▶</span>
-                <span class="toolbar-text">Execute</span>
-            </button>
-            <button class="toolbar-button" title="Stop">
-                <span class="toolbar-icon">⏹</span>
-                <span class="toolbar-text">Stop</span>
-            </button>
+            <div class="toolbar-group">
+                <button class="toolbar-button" title="Execute">
+                    <span class="toolbar-icon">▶</span>
+                    <span class="toolbar-text">Execute</span>
+                </button>
+                <button class="toolbar-button" title="Stop">
+                    <span class="toolbar-icon">⏹</span>
+                    <span class="toolbar-text">Stop</span>
+                </button>
+            </div>
             <div class="toolbar-separator"></div>
-            <button class="toolbar-button" id="connect-button" title="Connect">
-                <span class="toolbar-icon">🔗</span>
-                <span class="toolbar-text">Connect</span>
-            </button>
-            <button class="toolbar-button" id="manage-connections-button" title="Manage Connections">
-                <span class="toolbar-icon">⚙️</span>
-                <span class="toolbar-text">Manage Connections</span>
-            </button>
+            <div class="toolbar-group">
+                <button class="toolbar-button" id="connect-button" title="Connect">
+                    <span class="toolbar-icon">🔗</span>
+                    <span class="toolbar-text">Connect</span>
+                </button>
+                <button class="toolbar-button" id="manage-connections-button" title="Manage Connections">
+                    <span class="toolbar-icon">⚙️</span>
+                    <span class="toolbar-text">Manage Connections</span>
+                </button>
+                <button class="toolbar-button" id="database-monitor-button" title="Database Monitor">
+                    <span class="toolbar-icon">📈</span>
+                    <span class="toolbar-text">Monitor</span>
+                </button>
+            </div>
+            <div class="toolbar-separator"></div>
+            <div class="toolbar-group">
+                <button class="toolbar-button" title="Parse Query">
+                    <span class="toolbar-icon">🔍</span>
+                    <span class="toolbar-text">Parse</span>
+                </button>
+                <button class="toolbar-button" title="Display Estimated Execution Plan">
+                    <span class="toolbar-icon">📊</span>
+                    <span class="toolbar-text">Execution Plan</span>
+                </button>
+            </div>
         </div>
 
         <!-- Main Content Area -->
@@ -59,16 +80,18 @@
 
             <!-- Document Area (Center) -->
             <div class="document-area">
-                <div class="tabs">
-                    <button class="tab-nav-button tab-nav-prev" title="Previous Tab (Ctrl+Shift+Tab)" disabled>◀</button>
-                    <div class="tabs-container" id="tabs-container">
-                        <div class="tab active" data-tab-id="tab-1">
-                            <span class="tab-title">SQLQuery_1.sql</span>
-                            <span class="tab-close" title="Close Tab (Ctrl+W)">×</span>
+                <div class="tabs-container-wrapper">
+                    <div class="tabs">
+                        <button class="tab-nav-button tab-nav-prev" title="Previous Tab (Ctrl+Shift+Tab)" disabled>◀</button>
+                        <div class="tabs-container" id="tabs-container">
+                            <div class="tab active" data-tab-id="tab-1">
+                                <span class="tab-title">SQLQuery_1.sql</span>
+                                <span class="tab-close" title="Close Tab (Ctrl+W)">×</span>
+                            </div>
                         </div>
+                        <button class="tab-nav-button tab-nav-next" title="Next Tab (Ctrl+Tab)" disabled>▶</button>
+                        <div class="tab-new" title="New Query (Ctrl+T)">+</div>
                     </div>
-                    <button class="tab-nav-button tab-nav-next" title="Next Tab (Ctrl+Tab)" disabled>▶</button>
-                    <div class="tab-new" title="New Query (Ctrl+T)">+</div>
                 </div>
                 <div class="query-editor active" data-tab-id="tab-1">
                     <textarea class="sql-editor" placeholder="Write your SQL query here..."> </textarea>
@@ -79,13 +102,17 @@
                         <div class="result-tab" data-tab-type="messages">Messages</div>
                     </div>
                     <div class="result-content active" data-tab-type="results">
-                        <table class="result-table">
-                           
-                        </table>
+                        <div class="result-content-container">
+                            <table class="result-table">
+                               
+                            </table>
+                        </div>
                     </div>
                     <div class="result-content" data-tab-type="messages">
-                        <div class="messages-content">
-                            <!-- Messages will be displayed here -->
+                        <div class="result-content-container">
+                            <div class="messages-content">
+                                <!-- Messages will be displayed here -->
+                            </div>
                         </div>
                     </div>
                 </div>

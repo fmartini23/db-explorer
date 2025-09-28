@@ -86,6 +86,10 @@ function setupMenuEventListeners() {
     document.getElementById('manage-connections-button').addEventListener('click', function() {
         manageConnections();
     });
+    
+    document.getElementById('database-monitor-button').addEventListener('click', function() {
+        showDatabaseMonitor();
+    });
 }
 
 // Setup IPC event listeners
@@ -233,16 +237,49 @@ function setupIPCEventListeners() {
         }
     });
     
+    // Handle connection test result
+    ipcRenderer.on('connection-test-result', (event, result) => {
+        if (result.success) {
+            showMessage(result.message);
+        } else {
+            showMessage(`Connection test failed: ${result.message}`);
+        }
+    });
+    
+    // Handle display estimated execution plan
+    ipcRenderer.on('display-estimated-plan', (event) => {
+        displayEstimatedExecutionPlan();
+    });
+    
+    // Handle include actual execution plan
+    ipcRenderer.on('include-actual-plan', (event) => {
+        includeActualExecutionPlan();
+    });
+    
+    // Handle include client statistics
+    ipcRenderer.on('include-client-statistics', (event) => {
+        includeClientStatistics();
+    });
+    
+    // Handle specify values for template parameters
+    ipcRenderer.on('specify-values', (event) => {
+        specifyTemplateParameters();
+    });
+    
+    // Handle design query in editor
+    ipcRenderer.on('design-query', (event) => {
+        designQueryInEditor();
+    });
+    
     // Handle estimated execution plan result
     ipcRenderer.on('estimated-plan-result', (event, result) => {
         if (result.success) {
             showMessage(result.message);
-            // Create a new tab for the execution plan
-            const newTabId = createNewTab('EstimatedPlan.sqlplan');
-            const planEditor = document.querySelector(`.query-editor[data-tab-id="${newTabId}"] .sql-editor`);
-            if (planEditor) {
-                planEditor.value = result.plan;
-            }
+            // Send the plan to the Execution Plan window
+            ipcRenderer.send('show-execution-plan', {
+                plan: result.plan,
+                query: result.query || 'Unknown query'
+            });
         } else {
             showMessage(`Error generating execution plan: ${result.error}`);
         }
@@ -355,6 +392,11 @@ function setupIPCEventListeners() {
         loadConnections();
     });
     
+    // Handle reload connections request
+    ipcRenderer.on('reload-connections', (event) => {
+        loadConnections();
+    });
+
     // Handle connection test result
     ipcRenderer.on('connection-test-result', (event, result) => {
         if (result.success) {
@@ -401,6 +443,11 @@ function handleViewMenuAction(action) {
             togglePropertiesPanel();
             break;
     }
+}
+
+// Add this new function
+function showDatabaseMonitor() {
+    ipcRenderer.send('show-database-monitor');
 }
 
 // Handle help menu actions
@@ -582,8 +629,17 @@ function setupToolbarEventListeners() {
                 case 'Execute':
                     executeQuery();
                     break;
+                case 'Stop':
+                    stopQuery();
+                    break;
                 case 'New Query':
                     newQuery();
+                    break;
+                case 'Open':
+                    ipcRenderer.send('open-file-dialog');
+                    break;
+                case 'Save':
+                    saveCurrentFile();
                     break;
                 case 'Connect':
                     connectToDatabase();
@@ -591,9 +647,25 @@ function setupToolbarEventListeners() {
                 case 'Manage Connections':
                     manageConnections();
                     break;
+                case 'Parse':
+                    parseQuery();
+                    break;
+                case 'Execution Plan':
+                    displayEstimatedExecutionPlan();
+                    break;
             }
         });
     });
+}
+
+// Add this new function for stopping queries
+function stopQuery() {
+    // In a real implementation, you would send a message to stop the current query
+    // For now, we'll just show a message
+    showMessage('Query execution stopped');
+    
+    // Send to main process to handle actual query stopping
+    ipcRenderer.send('stop-query');
 }
 
 // Setup panel resizing
@@ -984,43 +1056,6 @@ function executeSelection() {
         return;
     }
     
-    if (!state.currentConnectionId) {
-        showMessage('Please connect to a database first.');
-        return;
-    }
-    
-    showMessage(`Executing selection: ${selectedText.substring(0, 30)}...`);
-    
-    // Record query in history
-    state.queryHistory.push({
-        query: selectedText,
-        timestamp: new Date(),
-        tabId: state.activeTabId
-    });
-    
-    // Execute the selected query
-    ipcRenderer.send('execute-query', state.currentConnectionId, selectedText);
-}
-
-function parseQuery() {
-    const editor = document.querySelector(`.query-editor[data-tab-id="${state.activeTabId}"] .sql-editor`) || 
-                  document.querySelector('.sql-editor');
-    const query = editor.value;
-    
-    if (query.trim() === '') {
-        showMessage('Please enter a query to parse.');
-        return;
-    }
-    
-    if (!state.currentConnectionId) {
-        showMessage('Please connect to a database first.');
-        return;
-    }
-    
-    showMessage('Parsing query...');
-    
-    // Send to main process to parse the query
-    ipcRenderer.send('parse-query', state.currentConnectionId, query);
 }
 
 function displayEstimatedExecutionPlan() {
@@ -1042,6 +1077,27 @@ function displayEstimatedExecutionPlan() {
     
     // Send to main process to generate the execution plan
     ipcRenderer.send('generate-estimated-plan', state.currentConnectionId, query);
+}
+
+function parseQuery() {
+    const editor = document.querySelector(`.query-editor[data-tab-id="${state.activeTabId}"] .sql-editor`) || 
+                  document.querySelector('.sql-editor');
+    const query = editor.value;
+    
+    if (query.trim() === '') {
+        showMessage('Please enter a query to parse.');
+        return;
+    }
+    
+    if (!state.currentConnectionId) {
+        showMessage('Please connect to a database first.');
+        return;
+    }
+    
+    showMessage('Parsing query...');
+    
+    // Send to main process to parse the query
+    ipcRenderer.send('parse-query', state.currentConnectionId, query);
 }
 
 function includeActualExecutionPlan() {
@@ -1169,8 +1225,8 @@ function connectToDatabaseById(connectionId) {
     state.currentConnectionId = connectionId;
     // Add to active connections
     state.activeConnections.add(connectionId);
-    // In a real app, you would retrieve connection details and connect
-    ipcRenderer.send('get-connection-details', connectionId);
+    // Request real connection to database with decrypted credentials
+    ipcRenderer.send('connect-to-database-real', connectionId);
 }
 
 // Object Explorer functions
@@ -1760,6 +1816,11 @@ function displayQueryResults(data, columns) {
         return;
     }
     
+    // Store data and columns for filtering
+    const tableContainer = document.createElement('div');
+    tableContainer.dataset.tableData = JSON.stringify(data);
+    tableContainer.dataset.tableColumns = JSON.stringify(columns || []);
+    
     // Create enhanced DataTable-like structure
     let tableHTML = `
         <div class="data-table-container">
@@ -1807,6 +1868,7 @@ function displayQueryResults(data, columns) {
                 tableHTML += `<td data-column="${colIndex}" data-row="${rowIndex}">${formatCellValue(value)}</td>`;
             });
         }
+        tableHTML += '</tr>';
     });
     
     tableHTML += `
@@ -1848,10 +1910,46 @@ function displayQueryResults(data, columns) {
         });
     });
     
+    // Store reference to data and columns for filtering
+    const dataTableContainer = resultContent.querySelector('.data-table-container');
+    dataTableContainer.dataset.tableData = JSON.stringify(data);
+    dataTableContainer.dataset.tableColumns = JSON.stringify(columns || []);
+    
     const filterInput = resultContent.querySelector('.filter-input');
     filterInput.addEventListener('input', () => {
-        filterTable(table, filterInput.value);
+        // Get the data and columns from the container
+        const container = filterInput.closest('.data-table-container');
+        const tableData = JSON.parse(container.dataset.tableData);
+        const tableColumns = JSON.parse(container.dataset.tableColumns);
+        
+        // Call the correct filterTable function
+        filterTable(container, tableData, tableColumns, filterInput.value);
     });
+    
+    // Add event listeners for pagination
+    const paginationControls = resultContent.querySelector('.pagination-controls');
+    if (paginationControls) {
+        const rowsPerPageSelect = resultContent.querySelector('.rows-per-page');
+        const currentPageSpan = resultContent.querySelector('.current-page');
+        const totalPagesSpan = resultContent.querySelector('.total-pages');
+        
+        // Set initial pagination state
+        const rowsPerPage = parseInt(rowsPerPageSelect.value) || data.length;
+        const totalPages = rowsPerPage === 0 ? 1 : Math.ceil(data.length / rowsPerPage);
+        if (totalPagesSpan) totalPagesSpan.textContent = totalPages;
+        
+        // Add event listeners for pagination buttons
+        paginationControls.addEventListener('click', function(e) {
+            if (e.target.classList.contains('pagination-button')) {
+                const action = e.target.classList[1]; // Get the action class (first-page, prev-page, etc.)
+                handlePagination(dataTableContainer, tableData, tableColumns, action);
+            }
+        });
+        
+        rowsPerPageSelect.addEventListener('change', function() {
+            updatePagination(dataTableContainer, tableData, tableColumns, 1);
+        });
+    }
 }
 
 function formatCellValue(value) {
@@ -1880,12 +1978,55 @@ function sortTable(table, columnIndex, columnField) {
     table.rows[0].cells[columnIndex].setAttribute('data-sort', isAscending ? 'asc' : 'desc');
 }
 
-function filterTable(table, filterValue) {
-    const rows = Array.from(table.rows).slice(1);
+function filterTable(container, tableData, tableColumns, filterValue) {
+    const rows = Array.from(container.querySelector('.result-table').rows).slice(1);
     rows.forEach(row => {
         const cells = Array.from(row.cells);
         const cellText = cells.map(cell => cell.textContent.toLowerCase()).join(' ');
         if (cellText.includes(filterValue.toLowerCase())) {
+            row.style.display = '';
+        } else {
+            row.style.display = 'none';
+        }
+    });
+}
+
+function handlePagination(container, tableData, tableColumns, action) {
+    const rowsPerPageSelect = container.querySelector('.rows-per-page');
+    const rowsPerPage = parseInt(rowsPerPageSelect.value) || tableData.length;
+    const currentPageSpan = container.querySelector('.current-page');
+    const totalPagesSpan = container.querySelector('.total-pages');
+    const currentPage = parseInt(currentPageSpan.textContent) || 1;
+    const totalPages = rowsPerPage === 0 ? 1 : Math.ceil(tableData.length / rowsPerPage);
+    
+    let newPage = currentPage;
+    if (action === 'first-page') {
+        newPage = 1;
+    } else if (action === 'prev-page') {
+        newPage = Math.max(1, currentPage - 1);
+    } else if (action === 'next-page') {
+        newPage = Math.min(totalPages, currentPage + 1);
+    } else if (action === 'last-page') {
+        newPage = totalPages;
+    }
+    
+    updatePagination(container, tableData, tableColumns, newPage);
+}
+
+function updatePagination(container, tableData, tableColumns, page) {
+    const rowsPerPageSelect = container.querySelector('.rows-per-page');
+    const rowsPerPage = parseInt(rowsPerPageSelect.value) || tableData.length;
+    const currentPageSpan = container.querySelector('.current-page');
+    const totalPagesSpan = container.querySelector('.total-pages');
+    const totalPages = rowsPerPage === 0 ? 1 : Math.ceil(tableData.length / rowsPerPage);
+    
+    if (totalPagesSpan) totalPagesSpan.textContent = totalPages;
+    if (currentPageSpan) currentPageSpan.textContent = page;
+    
+    const rows = Array.from(container.querySelector('.result-table').rows).slice(1);
+    rows.forEach((row, rowIndex) => {
+        const rowNumber = rowIndex + 1;
+        if (rowNumber >= (page - 1) * rowsPerPage + 1 && rowNumber <= page * rowsPerPage) {
             row.style.display = '';
         } else {
             row.style.display = 'none';
@@ -2809,7 +2950,16 @@ function updatePagination(container, data, columns, page) {
 
 // Render table body with given data
 function renderTableBody(container, data, columns) {
-    const tbody = container.querySelector('tbody');
+    // Validate that data is an array
+    if (!Array.isArray(data)) {
+        console.error('renderTableBody: data is not an array', data);
+        return;
+    }
+    
+    const table = container.querySelector('.result-table');
+    if (!table) return;
+    
+    const tbody = table.querySelector('tbody');
     if (!tbody) return;
     
     let rowsHTML = '';

@@ -248,7 +248,10 @@
                 
                 <div class="form-group">
                     <label for="password">Password</label>
-                    <input type="password" id="password" placeholder="password">
+                    <div style="display: flex; gap: 5px;">
+                        <input type="password" id="password" placeholder="password" style="flex: 1;">
+                        <button type="button" id="toggle-password" style="width: 80px; padding: 8px; cursor: pointer;">Show</button>
+                    </div>
                 </div>
             </div>
             
@@ -317,7 +320,8 @@
         
         // Application state
         const state = {
-            currentTab: 'new'
+            currentTab: 'new',
+            editingConnectionId: null
         };
         
         // Initialize the application when DOM is loaded
@@ -341,6 +345,7 @@
             setupAdvancedOptionsEventListeners();
             setupIPCEventListeners();
             setupDatabaseTypeEventListeners();
+            setupEditIPCListeners();
         }
         
         // Setup tab event listeners
@@ -362,6 +367,23 @@
             
             // Cancel connection button
             document.getElementById('cancel-connection').addEventListener('click', cancelConnection);
+            
+            // Toggle password visibility
+            document.getElementById('toggle-password').addEventListener('click', togglePasswordVisibility);
+        }
+        
+        // Add this function to toggle password visibility
+        function togglePasswordVisibility() {
+            const passwordField = document.getElementById('password');
+            const toggleButton = document.getElementById('toggle-password');
+            
+            if (passwordField.type === 'password') {
+                passwordField.type = 'text';
+                toggleButton.textContent = 'Hide';
+            } else {
+                passwordField.type = 'password';
+                toggleButton.textContent = 'Show';
+            }
         }
         
         // Setup advanced options event listeners
@@ -375,6 +397,11 @@
             ipcRenderer.on('connection-saved', (event, connectionId) => {
                 showNotification('Connection saved successfully!', 'success');
                 clearForm();
+            });
+            
+            // Handle connection save error
+            ipcRenderer.on('connection-save-error', (event, errorMessage) => {
+                showNotification(`Error saving connection: ${errorMessage}`, 'error');
             });
             
             // Handle new connection test result
@@ -391,6 +418,11 @@
                 displayConnections(connections);
             });
             
+            // Handle connections error
+            ipcRenderer.on('connections-error', (event, errorMessage) => {
+                showNotification(`Error loading connections: ${errorMessage}`, 'error');
+            });
+            
             // Handle connection test result
             ipcRenderer.on('connection-test-result', (event, result) => {
                 if (result.success) {
@@ -404,6 +436,11 @@
             ipcRenderer.on('connection-deleted', (event, connectionId) => {
                 showNotification('Connection deleted successfully!', 'success');
                 loadConnections();
+            });
+            
+            // Handle connection delete error
+            ipcRenderer.on('connection-delete-error', (event, errorMessage) => {
+                showNotification(`Error deleting connection: ${errorMessage}`, 'error');
             });
         }
         
@@ -448,6 +485,11 @@
         
         function saveConnection() {
             const connection = getConnectionData();
+            
+            // If we're editing an existing connection, preserve its ID
+            if (state.editingConnectionId) {
+                connection.id = state.editingConnectionId;
+            }
             
             if (!validateConnectionData(connection)) {
                 return;
@@ -503,6 +545,15 @@
             // Reset advanced options
             document.getElementById('advanced-options').style.display = 'none';
             document.getElementById('advanced-toggle').textContent = 'Advanced Options ▼';
+            
+            // Reset editing state
+            state.editingConnectionId = null;
+            
+            // Reset save button text
+            document.getElementById('save-connection').textContent = 'Save Connection';
+            
+            // Set default port
+            document.getElementById('port').value = '3306';
         }
         
         // Load connections
@@ -538,7 +589,8 @@
                                 </div>
                             </div>
                             <div class="connection-actions">
-                                <button class="btn-edit" data-id="${connection.id}">Connect</button>
+                                <button class="btn-connect" data-id="${connection.id}">Connect</button>
+                                <button class="btn-edit" data-id="${connection.id}">Edit</button>
                                 <button class="btn-test" data-id="${connection.id}">Test</button>
                                 <button class="btn-delete" data-id="${connection.id}">Delete</button>
                             </div>
@@ -559,6 +611,55 @@
             }
         }
         
+        // Add a new function to edit a connection
+        function editConnection(connectionId) {
+            // Switch to the new connection tab
+            switchToTab('new');
+            
+            // Set the editing state
+            state.editingConnectionId = connectionId;
+            
+            // Request the connection data from the main process
+            ipcRenderer.send('get-connection-by-id', connectionId);
+        }
+        
+        // Add IPC handler for receiving connection data for editing
+        function setupEditIPCListeners() {
+            // Handle connection data for editing
+            ipcRenderer.on('connection-data', (event, connection) => {
+                if (connection) {
+                    // Populate the form with the connection data
+                    document.getElementById('connection-name').value = connection.name || '';
+                    document.getElementById('connection-type').value = connection.type || 'mysql';
+                    document.getElementById('host').value = connection.host || '';
+                    document.getElementById('port').value = connection.port || '';
+                    document.getElementById('database').value = connection.database || '';
+                    document.getElementById('username').value = connection.username || '';
+                    document.getElementById('password').value = connection.password || '';
+                    document.getElementById('connection-timeout').value = connection.timeout || '30';
+                    document.getElementById('ssl-mode').value = connection.sslMode || 'disable';
+                    document.getElementById('ssl-cert').value = connection.sslCert || '';
+                    document.getElementById('ssl-key').value = connection.sslKey || '';
+                    document.getElementById('ssl-ca').value = connection.sslCa || '';
+                    document.getElementById('additional-params').value = connection.additionalParams || '';
+                    document.getElementById('description').value = connection.description || '';
+                    
+                    // Update the port based on database type
+                    updatePortBasedOnDatabaseType({target: document.getElementById('connection-type')});
+                    
+                    // Change the save button text to "Update"
+                    document.getElementById('save-connection').textContent = 'Update Connection';
+                    
+                    showNotification(`Editing connection: ${connection.name}`, 'info');
+                }
+            });
+            
+            // Handle connection data error
+            ipcRenderer.on('connection-data-error', (event, errorMessage) => {
+                showNotification(`Error loading connection data: ${errorMessage}`, 'error');
+            });
+        }
+        
         // Setup connection action event listeners
         function setupConnectionActionEventListeners() {
             // Add event listeners to delete buttons
@@ -572,11 +673,19 @@
             });
             
             // Add event listeners to connect buttons
-            document.querySelectorAll('.btn-edit').forEach(button => {
+            document.querySelectorAll('.btn-connect').forEach(button => {
                 button.addEventListener('click', (e) => {
                     const connectionId = e.target.getAttribute('data-id') || e.target.parentElement.getAttribute('data-id');
                     // Send message to main process to connect to the database
                     ipcRenderer.send('connect-to-database', connectionId);
+                });
+            });
+            
+            // Add event listeners to edit buttons
+            document.querySelectorAll('.btn-edit').forEach(button => {
+                button.addEventListener('click', (e) => {
+                    const connectionId = e.target.getAttribute('data-id') || e.target.parentElement.getAttribute('data-id');
+                    editConnection(connectionId);
                 });
             });
             

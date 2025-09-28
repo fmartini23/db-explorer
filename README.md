@@ -2,7 +2,7 @@
 
 A desktop application for database management with a layout similar to Microsoft SQL Server Management Studio, built with Electron.
 
-![DB Explorer Screenshot]
+![DB Explorer Screenshot](screenshots/database_monitor.png)
 
 ## Features
 
@@ -16,8 +16,9 @@ A desktop application for database management with a layout similar to Microsoft
 - **SQL Editor**: Full-featured SQL editor with syntax highlighting
 - **Tabbed Interface**: Work with multiple queries simultaneously
 - **Query Execution**: Execute SQL queries with detailed execution statistics
-- **Results Grid**: Display query results in a sortable, filterable data grid
+- **Results Grid**: Display query results in a sortable, filterable data grid with pagination
 - **Messages Panel**: View execution messages, errors, and performance statistics
+- **Search and Filter**: Filter query results directly in the results grid
 
 ### User Interface
 - **Professional UI**: Interface similar to SQL Server Management Studio
@@ -31,6 +32,7 @@ A desktop application for database management with a layout similar to Microsoft
 - **Script Generation**: Generate CREATE, DROP, and DROP/CREATE scripts for database objects
 - **Data Viewing**: Quickly view top rows of tables and views
 - **Query History**: Access previously executed queries
+- **Explain Plan**: Analyze query execution plans without executing queries
 - **Export Results**: Export query results (planned feature)
 
 ## Installation
@@ -84,8 +86,9 @@ This will create a distributable package in the `dist` folder.
 ### Executing Queries
 1. Write your SQL query in the editor
 2. Press F5 or click the "Execute" button in the toolbar
-3. View results in the Results tab
-4. View execution messages in the Messages tab
+3. View results in the Results tab with sortable, filterable grid
+4. Use the search box to filter results directly in the grid
+5. View execution messages in the Messages tab
 
 ### Working with Database Objects
 1. Expand the "Connections" node in the Object Explorer
@@ -102,6 +105,12 @@ This will create a distributable package in the `dist` folder.
 2. Edit existing connections or create new ones
 3. Delete connections you no longer need
 4. Test connections before saving
+
+### Using Explain Plan
+1. Write or open an SQL query in the editor
+2. Click on the "Execution Plan" button in the toolbar (📊 icon) or go to Query menu and select "Display Estimated Execution Plan"
+3. View the execution plan in the new tab that opens
+4. Analyze the plan to understand how the database will execute your query and identify potential performance improvements
 
 ## Project Structure
 
@@ -153,6 +162,25 @@ db-explorer/
 - **HTML Files**: Define the user interface structure
 - **CSS Files**: Handle application styling and themes
 
+## Recent Improvements
+
+### Query Execution Fixes
+- Fixed critical bug where query execution was not working due to missing IPC handler
+- Implemented proper error handling for database connection and query execution
+- Added support for multiple database types (MySQL, PostgreSQL, SQL Server)
+
+### UI/UX Enhancements
+- Fixed JavaScript errors in table filtering functionality
+- Added comprehensive styling for result tables with improved readability
+- Implemented proper pagination controls for large result sets
+- Enhanced data grid with sorting, filtering, and column resizing capabilities
+- Improved dark/light theme support with consistent color schemes
+
+### Performance Improvements
+- Optimized database connection management with connection reuse
+- Added execution time tracking for queries
+- Improved memory management for large result sets
+
 ## Keyboard Shortcuts
 
 | Shortcut | Action |
@@ -168,18 +196,10 @@ db-explorer/
 
 ## Screenshots
 
-### Main Interface
-![Main Interface](screenshots/main-interface.png)
-
-### Query Execution
-![Query Execution](screenshots/query-execution.png)
-
-### Table Designer
-![Table Designer](screenshots/table-designer.png)
-
-### Connection Manager
-![Connection Manager](screenshots/connection-manager.png)
-
+ 
+### Database Monitor
+![Database Monitor](screenshots/database_monitor.png)
+ 
 ## Roadmap
 
 ### Planned Features
