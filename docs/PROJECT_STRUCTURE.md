@@ -93,5 +93,3 @@ Contains built distributable packages (created during build process).
 4. **Tests**: All test files should be placed in the `tests/` directory
 5. **Documentation**: All documentation should be placed in the `docs/` directory
 6. **Utilities**: Helper functions and utility modules should be placed in `src/utils/`
-
-This structure follows common Electron application patterns and makes the project easier to navigate and maintain.

@@ -2,8 +2,6 @@
 
 A desktop application for database management with a layout similar to Microsoft SQL Server Management Studio, built with Electron.
 
-![DB Explorer Screenshot](../src/assets/screenshots/database_monitor.png)
-
 ## Features
 
 ### Database Management
@@ -203,7 +201,13 @@ db-explorer/
 ## Screenshots
 
 ### Main Interface
-![Main Interface](../src/assets/screenshots/database_monitor.png)
+![Main Interface](src/assets/screenshots/main.png)
+
+### Database Manager
+![Database Manager](src/assets/screenshots/database_manager.png)
+
+### Database Monitor
+![Database Monitor](src/assets/screenshots/database_monitor.png)
 
 ## Roadmap
 
