@@ -1,5 +1,5 @@
 {
-  "appId": "com.example.dbexplorer",
+  "appId": "com.fmartini23.dbexplorer",
   "productName": "DB Explorer",
   "directories": {
     "output": "dist"

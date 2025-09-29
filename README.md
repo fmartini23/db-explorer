@@ -2,7 +2,7 @@
 
 A desktop application for database management with a layout similar to Microsoft SQL Server Management Studio, built with Electron.
 
-![DB Explorer Screenshot](screenshots/database_monitor.png)
+![DB Explorer Screenshot](../src/assets/screenshots/database_monitor.png)
 
 ## Features
 
@@ -114,18 +114,24 @@ This will create a distributable package in the `dist` folder.
 
 ## Project Structure
 
+For detailed information about the project structure, see [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md).
+
 ```
 db-explorer/
-├── main.js              # Main Electron process
-├── renderer.js          # Renderer process (UI logic)
-├── index.html           # Main HTML file
-├── styles.css           # Application styles
-├── connection.html      # Connection manager UI
-├── table-design.html    # Table designer UI
-├── properties.html      # Properties window UI
-├── about.html           # About dialog
-├── package.json         # Project metadata and dependencies
-└── README.md            # This file
+├── src/
+│   ├── main/
+│   ├── renderer/
+│   ├── assets/
+│   │   ├── icons/
+│   │   └── screenshots/
+│   └── utils/
+├── tests/
+├── docs/
+├── dist/
+├── node_modules/
+├── package.json
+├── package-lock.json
+└── .gitignore
 ```
 
 ## Technology Stack
@@ -157,10 +163,10 @@ db-explorer/
 5. Create a Pull Request
 
 ### Code Structure
-- **main.js**: Handles Electron main process, window management, and database connections
-- **renderer.js**: Manages UI logic, event handling, and communication with main process
-- **HTML Files**: Define the user interface structure
-- **CSS Files**: Handle application styling and themes
+- **src/main/main.js**: Handles Electron main process, window management, and database connections
+- **src/renderer/renderer.js**: Manages UI logic, event handling, and communication with main process
+- **src/renderer/*.html**: Define the user interface structure
+- **src/renderer/styles.css**: Handle application styling and themes
 
 ## Recent Improvements
 
@@ -196,10 +202,9 @@ db-explorer/
 
 ## Screenshots
 
- 
-### Database Monitor
-![Database Monitor](screenshots/database_monitor.png)
- 
+### Main Interface
+![Main Interface](../src/assets/screenshots/database_monitor.png)
+
 ## Roadmap
 
 ### Planned Features

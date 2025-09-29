@@ -15,7 +15,7 @@ const oracledb = require('oracledb');
 const { MongoClient } = require('mongodb');
 
 // Add this line after the other requires
-const { generateEstimatedExecutionPlan } = require('./execution-plan');
+const { generateEstimatedExecutionPlan } = require('./execution-plan.js');
 
 // Configuration
 const ENCRYPTION_KEY = crypto.createHash('sha256').update('your-secret-key').digest('base64').substr(0, 32);
@@ -237,7 +237,7 @@ function createPropertiesWindow() {
     }
   });
 
-  propertiesWindow.loadFile('properties.html');
+  propertiesWindow.loadFile('src/renderer/properties.html');
   
   // Handle window close event
   propertiesWindow.on('closed', () => {
@@ -262,7 +262,7 @@ function createWindow() {
     }
   });
 
-  mainWindow.loadFile('index.html');
+  mainWindow.loadFile('src/renderer/index.html');
   
   // Enable dev tools in development mode
   if (isDev) {
@@ -363,7 +363,7 @@ function createConnectionWindow() {
     }
   });
 
-  connectionWindow.loadFile('connection.html');
+  connectionWindow.loadFile('src/renderer/connection.html');
   
   // Handle window close event
   connectionWindow.on('closed', () => {
@@ -433,7 +433,7 @@ function createTableDesignWindow(tableName, connectionId, mode = 'edit') {
   });
 
   // Load the table design HTML file
-  tableDesignWindow.loadFile('table-design.html');
+  tableDesignWindow.loadFile('src/renderer/table-design.html');
   
   // Pass the table name, connection ID, and mode to the window
   tableDesignWindow.webContents.on('did-finish-load', () => {
@@ -459,7 +459,7 @@ function createExecutionPlanWindow() {
     }
   });
 
-  executionPlanWindow.loadFile('execution-plan.html');
+  executionPlanWindow.loadFile('src/renderer/execution-plan.html');
   
   // Handle window close event
   executionPlanWindow.on('closed', () => {
@@ -489,7 +489,7 @@ function createDatabaseMonitorWindow() {
     }
   });
 
-  databaseMonitorWindow.loadFile('database-monitor.html');
+  databaseMonitorWindow.loadFile('src/renderer/database-monitor.html');
   
   // Handle window close event
   databaseMonitorWindow.on('closed', () => {
@@ -528,31 +528,7 @@ function getMenuTemplate() {
           accelerator: 'CmdOrCtrl+O',
           click: () => {
             if (mainWindow) {
-              dialog.showOpenDialog(mainWindow, {
-                properties: ['openFile'],
-                filters: [
-                  { name: 'SQL Files', extensions: ['sql'] },
-                  { name: 'All Files', extensions: ['*'] }
-                ]
-              }).then(result => {
-                if (!result.canceled && result.filePaths.length > 0) {
-                  const filePath = result.filePaths[0];
-                  fs.readFile(filePath, 'utf8', (err, data) => {
-                    if (err) {
-                      mainWindow.webContents.send('file-open-error', err.message);
-                    } else {
-                      // Add to recent files
-                      if (!recentFiles.includes(filePath)) {
-                        recentFiles.unshift(filePath);
-                        if (recentFiles.length > 10) recentFiles.pop(); // Keep only last 10
-                      }
-                      mainWindow.webContents.send('file-opened', { filePath, content: data });
-                    }
-                  });
-                }
-              }).catch(err => {
-                mainWindow.webContents.send('file-open-error', err.message);
-              });
+              mainWindow.webContents.send('open-file-dialog');
             }
           }
         },
@@ -1092,6 +1068,37 @@ ipcMain.on('test-connection', (event, connectionId) => {
 // Add this IPC handler for opening the connection window from the renderer
 ipcMain.on('open-connection-window', () => {
   createConnectionWindow();
+});
+
+// Add this IPC handler for opening files through IPC
+ipcMain.on('open-file-dialog', () => {
+  if (mainWindow) {
+    dialog.showOpenDialog(mainWindow, {
+      properties: ['openFile'],
+      filters: [
+        { name: 'SQL Files', extensions: ['sql'] },
+        { name: 'All Files', extensions: ['*'] }
+      ]
+    }).then(result => {
+      if (!result.canceled && result.filePaths.length > 0) {
+        const filePath = result.filePaths[0];
+        fs.readFile(filePath, 'utf8', (err, data) => {
+          if (err) {
+            mainWindow.webContents.send('file-open-error', err.message);
+          } else {
+            // Add to recent files
+            if (!recentFiles.includes(filePath)) {
+              recentFiles.unshift(filePath);
+              if (recentFiles.length > 10) recentFiles.pop(); // Keep only last 10
+            }
+            mainWindow.webContents.send('file-opened', { filePath, content: data });
+          }
+        });
+      }
+    }).catch(err => {
+      mainWindow.webContents.send('file-open-error', err.message);
+    });
+  }
 });
 
 ipcMain.on('connect-to-database', (event, connectionId) => {
@@ -2132,6 +2139,69 @@ ipcMain.on('execute-query', async (event, connectionId, query) => {
     event.reply('query-result', {
       success: false,
       error: error.message
+    });
+  }
+});
+
+// Add this IPC handler for generating estimated execution plans
+ipcMain.on('generate-estimated-plan', async (event, connectionId, query) => {
+  try {
+    const connection = getConnectionById(connectionId);
+    if (!connection) {
+      event.reply('estimated-plan-result', {
+        success: false,
+        error: 'Connection not found'
+      });
+      return;
+    }
+    
+    // Generate the estimated execution plan
+    const plan = await generateEstimatedExecutionPlan(connection, query);
+    
+    // Send successful result back to renderer
+    event.reply('estimated-plan-result', {
+      success: true,
+      plan: plan,
+      query: query,
+      message: 'Execution plan generated successfully'
+    });
+  } catch (error) {
+    console.error('Error generating execution plan:', error);
+    // Send error back to renderer
+    event.reply('estimated-plan-result', {
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Add this IPC handler for opening files through IPC
+ipcMain.on('open-file-dialog', () => {
+  if (mainWindow) {
+    dialog.showOpenDialog(mainWindow, {
+      properties: ['openFile'],
+      filters: [
+        { name: 'SQL Files', extensions: ['sql'] },
+        { name: 'All Files', extensions: ['*'] }
+      ]
+    }).then(result => {
+      if (!result.canceled && result.filePaths.length > 0) {
+        const filePath = result.filePaths[0];
+        fs.readFile(filePath, 'utf8', (err, data) => {
+          if (err) {
+            mainWindow.webContents.send('file-open-error', err.message);
+          } else {
+            // Add to recent files
+            if (!recentFiles.includes(filePath)) {
+              recentFiles.unshift(filePath);
+              if (recentFiles.length > 10) recentFiles.pop(); // Keep only last 10
+            }
+            mainWindow.webContents.send('file-opened', { filePath, content: data });
+          }
+        });
+      }
+    }).catch(err => {
+      mainWindow.webContents.send('file-open-error', err.message);
     });
   }
 });
